@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin Portal</title>
+<link rel="stylesheet" href="/shared.css">
+<style>
+  .app { display: grid; grid-template-columns: 230px 1fr; min-height: 100vh; }
+  .side { background: #10231e; color: #cfe0da; padding: 18px 12px; position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 4px; }
+  .side h1 { color: #fff; font-size: 17px; padding: 0 10px 12px; }
+  .side button.nav { background: none; border: 0; color: inherit; text-align: left; padding: 11px 12px; border-radius: 9px; cursor: pointer; font-size: 14.5px; font-weight: 600; }
+  .side button.nav:hover { background: rgba(255,255,255,.07); }
+  .side button.nav.on { background: var(--green); color: #fff; }
+  .side .sp { flex: 1; }
+  .main { padding: 24px 28px 60px; min-width: 0; }
+  .main > h2 { font-size: 22px; }
+  @media (max-width: 860px) { .app { grid-template-columns: 1fr; } .side { position: static; height: auto; flex-direction: row; flex-wrap: wrap; } .side h1 { width: 100%; } .side .sp { display: none; } .main { padding: 16px; } }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .kpi { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .kpi .l { font-size: 12.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .kpi .v { font-size: 26px; font-weight: 800; margin-top: 4px; }
+  .seg { display: inline-flex; background: #e6ece9; border-radius: 10px; padding: 3px; }
+  .seg button { border: 0; background: none; padding: 7px 16px; border-radius: 8px; font-weight: 700; cursor: pointer; color: #52605b; }
+  .seg button.on { background: #fff; color: var(--green); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+  .two { display: grid; grid-template-columns: 3fr 2fr; gap: 16px; }
+  @media (max-width: 1100px) { .two { grid-template-columns: 1fr; } }
+  .chart svg { width: 100%; height: auto; display: block; }
+  .chart .bar { fill: var(--green); } .chart .bar:hover { fill: #1f7a64; }
+  .chart text { font-size: 11px; fill: #6b7773; }
+  .meter { height: 8px; background: #e8eeeb; border-radius: 6px; overflow: hidden; min-width: 80px; }
+  .meter i { display: block; height: 100%; background: var(--orange); }
+  .thumb { width: 46px; height: 46px; border-radius: 8px; background: #eef2f0 center/cover; display: inline-grid; place-items: center; font-size: 20px; flex: none; }
+  .imgs { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 4px; }
+  .imgs .im { position: relative; width: 84px; height: 84px; border-radius: 10px; background: center/cover; border: 2px solid transparent; }
+  .imgs .im.cover { border-color: var(--green); }
+  .imgs .im button { position: absolute; top: -7px; right: -7px; width: 22px; height: 22px; border-radius: 50%; border: 0; background: var(--red); color: #fff; cursor: pointer; }
+  .imgs .im em { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(23,89,74,.9); color: #fff; font-size: 10px; text-align: center; border-radius: 0 0 8px 8px; font-style: normal; }
+  .imgs .im u { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,.55); color: #fff; font-size: 10px; text-align: center; cursor: pointer; text-decoration: none; border-radius: 0 0 8px 8px; }
+  .addimg { width: 84px; height: 84px; border: 2px dashed #b9c6c1; border-radius: 10px; display: grid; place-items: center; cursor: pointer; color: var(--muted); font-size: 12px; text-align: center; }
+  .cattabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .cattabs button { border: 1px solid #cfd8d5; background: #fff; border-radius: 99px; padding: 8px 16px; font-weight: 700; cursor: pointer; }
+  .cattabs button.on { background: var(--green); border-color: var(--green); color: #fff; }
+  .mb-item { display: grid; grid-template-columns: 60px minmax(160px, 1.4fr) minmax(220px, 1.6fr) auto; gap: 14px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .mb-item:last-child { border: 0; }
+  .mb-item .thumb { width: 60px; height: 60px; }
+  .mb-item .desc { color: var(--muted); font-size: 12.5px; max-height: 3.2em; overflow: hidden; }
+  .mb-item .opts { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+  .mb-item .promo { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+  .mb-item .promo input { width: 82px; padding: 5px 8px; }
+  @media (max-width: 1000px) { .mb-item { grid-template-columns: 60px 1fr; } }
+  .grp-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 12px; background: #fafcfb; }
+  .opt-row { display: grid; grid-template-columns: 1fr 100px 30px; gap: 8px; align-items: center; margin-bottom: 6px; }
+  .opt-row .nm { font-weight: 600; }
+  .tagbox { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .tagbox .chip button { border: 0; background: none; cursor: pointer; margin-left: 4px; color: inherit; }
+  .qr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; }
+  .qr-card { text-align: center; }
+  .qr-card .qr { display: grid; place-items: center; min-height: 140px; }
+  .qr-card .qr img, .qr-card .qr canvas { max-width: 140px; }
+  .qr-card .lnk { font-size: 11px; word-break: break-all; color: var(--muted); }
+  #qr-print { display: none; }
+  @media print {
+    body > *:not(#qr-print) { display: none !important; }
+    #qr-print { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    #qr-print .qr-card { border: 2px solid #000; border-radius: 12px; padding: 14px; break-inside: avoid; }
+    #qr-print h2 { font-size: 34px; margin: 6px 0; }
+  }
+</style>
+</head>
+<body>
+<div class="app no-print">
+  <aside class="side">
+    <h1>🍜 <span id="brand">Admin</span></h1>
+    <button class="nav on" data-tab="dash">📊 Dashboard</button>
+    <button class="nav" data-tab="cats">🗂 Categories</button>
+    <button class="nav" data-tab="items">🍲 Items &amp; Pricing</button>
+    <button class="nav" data-tab="builder">🏷 Menu Builder &amp; Tags</button>
+    <button class="nav" data-tab="tables">🪑 Tables &amp; QR</button>
+    <button class="nav" data-tab="settings">⚙️ Charges &amp; Settings</button>
+    <div class="sp"></div>
+    <button class="nav" id="logout">Log out</button>
+  </aside>
+  <main class="main" id="main"></main>
+</div>
+<div id="qr-print"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="/shared.js"></script>
+<script>
+const api = createApi('admin');
+let S = null, tab = 'dash', period = 'daily', ST = null, builderCat = null;
+
+async function loadState() {
+  S = await api.get('/api/admin/state');
+  CUR = S.settings.currency; $('#brand').textContent = S.settings.name;
+  if (!S.categories.some((c) => c.id === builderCat)) builderCat = S.categories[0] && S.categories[0].id;
+}
+async function boot() {
+  try { await loadState(); await show(); } catch (e) { if (api.token) toast(e.message, true); }
+}
+async function show(t) {
+  if (t) tab = t;
+  $$('.side .nav[data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+  if (tab === 'dash') { await renderDash(); return; }
+  ({ cats: renderCats, items: renderItems, builder: renderBuilder, tables: renderTables, settings: renderSettings })[tab]();
+}
+const catName = (id) => { const c = S.categories.find((x) => x.id === id); return c ? c.name : null; };
+const itemThumb = (it, cls = '') => `<span class="thumb ${cls}" ${it.images[0] ? `style="background-image:url('${esc(it.images[0])}')"` : ''}>${it.images[0] ? '' : '🍽️'}</span>`;
+const sw = (attrs, on) => `<label class="switch"><input type="checkbox" ${attrs} ${on ? 'checked' : ''}><span></span></label>`;
+async function act(fn, okMsg) { try { const r = await fn(); if (okMsg) toast(okMsg); return r; } catch (e) { toast(e.message, true); } }
+
+// ============================================================ DASHBOARD
+async function renderDash() {
+  if (!$('.kpis')) $('#main').innerHTML = '<h2>Dashboard</h2><p class="muted">Loading…</p>';
+  ST = await api.get(`/api/admin/stats?period=${period}`);
+  const s = ST.summary, maxQ = Math.max(1, ...ST.topItems.map((t) => t.qty)), maxC = Math.max(1, ...ST.categories.map((c) => c.revenue));
+  const label = { daily: 'last 30 days', weekly: 'last 12 weeks', monthly: 'last 12 months', yearly: 'last 5 years' }[period];
+  $('#main').innerHTML = `
+    <div class="row wrap" style="margin-bottom:14px"><h2 style="margin:0">Sales Dashboard</h2>
+      <div class="seg right">${['daily', 'weekly', 'monthly', 'yearly'].map((p) => `<button data-period="${p}" class="${p === period ? 'on' : ''}">${p[0].toUpperCase() + p.slice(1)}</button>`).join('')}</div></div>
+    <div class="kpis">
+      <div class="kpi"><div class="l">Total sales (${label})</div><div class="v">${fmt(s.revenue)}</div></div>
+      <div class="kpi"><div class="l">Net sales (excl. charges)</div><div class="v">${fmt(s.net)}</div></div>
+      <div class="kpi"><div class="l">Paid bills</div><div class="v">${s.bills}</div></div>
+      <div class="kpi"><div class="l">Avg. bill</div><div class="v">${fmt(s.avgBill)}</div></div>
+      <div class="kpi"><div class="l">Items sold</div><div class="v">${s.itemsSold}</div></div>
+      <div class="kpi"><div class="l">Open tables now</div><div class="v">${ST.live.openTables} <span class="muted small">${fmt(ST.live.openAmount)}</span></div></div>
+    </div>
+    <div class="card chart" style="margin-bottom:16px"><h3>${period[0].toUpperCase() + period.slice(1)} sales (${esc(CUR)})</h3>${chart(ST.series)}</div>
+    <div class="two">
+      <div class="card"><h3>🔥 Top selling items <span class="muted small">(${label})</span></h3>
+        ${ST.topItems.length ? `<table class="tbl"><tr><th>#</th><th>Item</th><th>Qty</th><th style="width:28%"></th><th>Sales</th></tr>${ST.topItems.map((t, i) =>
+          `<tr><td><b>${i + 1}</b></td><td>${esc(t.name)} ${i === 0 ? '<span class="chip orange">🔥 Hot</span>' : ''}</td><td><b>${t.qty}</b></td><td><div class="meter"><i style="width:${t.qty / maxQ * 100}%"></i></div></td><td>${fmt(t.revenue)}</td></tr>`).join('')}</table>`
+          : '<p class="muted">No paid sales in this period yet. Use “Generate demo sales” below to preview the dashboard.</p>'}</div>
+      <div class="grid" style="display:grid;gap:16px;align-content:start">
+        <div class="card"><h3>Sales by category</h3>${ST.categories.length ? ST.categories.map((c) => `<div style="margin-bottom:10px"><div class="row"><span class="grow">${esc(c.name)}</span><b>${fmt(c.revenue)}</b></div><div class="meter"><i style="width:${c.revenue / maxC * 100}%;background:var(--green)"></i></div></div>`).join('') : '<p class="muted">No data</p>'}</div>
+        <div class="card"><h3>Menu catalogue</h3>
+          <div class="row wrap" style="gap:18px;margin-bottom:8px"><div><b style="font-size:24px">${ST.catalog.listedItems}</b><div class="muted small">items listed in app</div></div><div><b style="font-size:24px">${ST.catalog.activeItems}</b><div class="muted small">available now</div></div><div><b style="font-size:24px">${ST.catalog.totalItems}</b><div class="muted small">total in system</div></div></div>
+          ${ST.catalog.categories.map((c) => `<div class="row small"><span class="grow">${esc(c.name)} ${c.active ? '' : '<span class="chip">inactive</span>'}</span><b>${c.items} items</b></div>`).join('')}</div>
+        <div class="card"><h3>Demo data</h3><p class="muted small">Fill the dashboard with ~1 year of sample paid bills (only to preview reports). Real sales are never touched.</p>
+          <div class="row"><button class="btn" id="demo-add">Generate demo sales</button><button class="btn danger" id="demo-del">Remove demo sales</button></div></div>
+      </div>
+    </div>`;
+}
+function chart(series) {
+  const W = 760, H = 240, L = 46, B = 28, T = 10, R = 8, n = series.length;
+  const max = Math.max(1, ...series.map((x) => x.revenue));
+  const nice = (() => { const p = Math.pow(10, Math.floor(Math.log10(max))); return Math.ceil(max / p) * p; })();
+  const bw = (W - L - R) / n, ch = H - T - B;
+  const step = Math.ceil(n / 12);
+  let g = '';
+  for (let i = 0; i <= 4; i++) { const y = T + ch - ch * i / 4; g += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="#e8eeeb"/><text x="${L - 6}" y="${y + 4}" text-anchor="end">${Math.round(nice * i / 4)}</text>`; }
+  series.forEach((p, i) => {
+    const h = ch * p.revenue / nice, x = L + i * bw + bw * .15;
+    g += `<rect class="bar" x="${x}" y="${T + ch - h}" width="${bw * .7}" height="${Math.max(h, p.revenue ? 1 : 0)}" rx="2"><title>${esc(p.label)}: ${fmt(p.revenue)} · ${p.bills} bills · ${p.items} items</title></rect>`;
+    if (i % step === 0 || i === n - 1) g += `<text x="${x + bw * .35}" y="${H - 8}" text-anchor="middle">${esc(p.label)}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Sales chart">${g}</svg>`;
+}
+
+// ============================================================ CATEGORIES
+function renderCats() {
+  $('#main').innerHTML = `<div class="row" style="margin-bottom:14px"><h2 style="margin:0">Categories</h2><button class="btn primary right" id="cat-new">+ New category</button></div>
+    <div class="card"><table class="tbl"><tr><th>Order</th><th>Name</th><th>Type</th><th>Items</th><th>Active</th><th></th></tr>
+    ${S.categories.map((c, i) => `<tr><td><button class="btn sm" data-cmove="${c.id}" data-d="-1" ${i === 0 ? 'disabled' : ''}>↑</button> <button class="btn sm" data-cmove="${c.id}" data-d="1" ${i === S.categories.length - 1 ? 'disabled' : ''}>↓</button></td>
+      <td><b>${esc(c.name)}</b></td><td><span class="chip">${c.type}</span></td><td>${S.items.filter((x) => x.categoryId === c.id).length}</td>
+      <td>${sw(`data-cactive="${c.id}"`, c.active)}</td>
+      <td style="text-align:right"><button class="btn sm" data-cedit="${c.id}">Edit</button> <button class="btn sm danger" data-cdel="${c.id}">Delete</button></td></tr>`).join('')}
+    </table>${S.categories.length ? '' : '<p class="muted">No categories yet.</p>'}</div>
+    <p class="muted small">Deactivated categories are hidden from customers. Add items to a category in “Menu Builder &amp; Tags”.</p>`;
+}
+function catModal(c) {
+  const m = modal(`<h2>${c ? 'Edit' : 'New'} category</h2>
+    <label class="field">Name<input id="f-name" value="${esc(c ? c.name : '')}" maxlength="60" placeholder="e.g. Noodles, Rice, Beverages"></label>
+    <label class="field">Type<select id="f-type">${[['food', 'Food'], ['drink', 'Drinks'], ['side', 'Sides / Snacks']].map(([v, l]) => `<option value="${v}" ${c && c.type === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+    <div class="modal-actions"><button class="btn" data-close>Cancel</button><button class="btn primary" id="f-save">Save</button></div>`);
+  $('#f-name', m.el).focus();
+  $('#f-save', m.el).onclick = async () => {
+    const body = { name: $('#f-name', m.el).value, type: $('#f-type', m.el).value };
+    const ok = await act(() => c ? api.put(`/api/admin/categories/${c.id}`, body) : api.post('/api/admin/categories', body), 'Saved');
+    if (ok) { m.close(); await loadState(); show(); }
+  };
+}
+
+// ============================================================ ITEMS
+function renderItems() {
+  $('#main').innerHTML = `<div class="row" style="margin-bottom:14px"><h2 style="margin:0">Items &amp; Pricing</h2><button class="btn primary right" id="item-new">+ New item</button></div>
+    <p class="muted">Create every dish / drink / add-on once here (name, description, price, photos). Then place items into categories and set tags in <b>Menu Builder</b>. Items without a category are hidden from the menu but can be used as add-ons.</p>
+    <div class="card"><table class="tbl"><tr><th></th><th>Item</th><th>Price</th><th>Category</th><th>Active</th><th></th></tr>
+    ${S.items.map((it) => `<tr><td>${itemThumb(it)}</td><td><b>${esc(it.name)}</b><div class="muted small">${esc(it.description).slice(0, 80)}</div></td>
+      <td>${it.promoPrice != null ? `<s class="muted">${fmt(it.price)}</s> <b style="color:var(--red)">${fmt(it.promoPrice)}</b>` : `<b>${fmt(it.price)}</b>`}</td>
+      <td>${catName(it.categoryId) ? esc(catName(it.categoryId)) : '<span class="chip">Add-on / unassigned</span>'}</td>
+      <td>${sw(`data-iactive="${it.id}"`, it.active)}</td>
+      <td style="text-align:right;white-space:nowrap"><button class="btn sm" data-iedit="${it.id}">Edit</button> <button class="btn sm danger" data-idel="${it.id}">Delete</button></td></tr>`).join('')}</table>
+    ${S.items.length ? '' : '<p class="muted">No items yet.</p>'}</div>`;
+}
+async function uploadImage(file) {
+  const bmp = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => rej(new Error('Not a valid image')); im.src = URL.createObjectURL(file); });
+  const sc = Math.min(1, 1000 / Math.max(bmp.width, bmp.height));
+  const cv = document.createElement('canvas'); cv.width = Math.round(bmp.width * sc); cv.height = Math.round(bmp.height * sc);
+  cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+  const blob = await new Promise((r) => cv.toBlob(r, 'image/jpeg', 0.85));
+  const res = await fetch('/api/admin/upload', { method: 'POST', headers: { 'Content-Type': 'image/jpeg', Authorization: `Bearer ${api.token}` }, body: blob });
+  const d = await res.json(); if (!res.ok) throw new Error(d.error || 'Upload failed');
+  return d.url;
+}
+function itemModal(it, defCat) {
+  let imgs = it ? [...it.images] : [];
+  const m = modal(`<h2>${it ? 'Edit' : 'New'} item</h2>
+    <label class="field">Item name<input id="f-name" maxlength="80" value="${esc(it ? it.name : '')}"></label>
+    <label class="field">Description<textarea id="f-desc" rows="3" maxlength="600" placeholder="Shown to customers on the item page">${esc(it ? it.description : '')}</textarea></label>
+    <div class="row"><label class="field grow">Price (${esc(CUR)})<input id="f-price" type="number" min="0" step="0.01" value="${it ? it.price : ''}"></label>
+    <label class="field grow">Show in category<select id="f-cat"><option value="">— None (add-on only) —</option>${S.categories.map((c) => `<option value="${c.id}" ${(it ? it.categoryId : defCat) === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label></div>
+    <div class="field">Photos <span class="muted small">(multiple allowed — first is the cover)</span><div class="imgs" id="f-imgs"></div></div>
+    <label class="inline"><input type="checkbox" id="f-active" ${!it || it.active ? 'checked' : ''}> Active (visible &amp; orderable)</label>
+    <div class="modal-actions"><button class="btn" data-close>Cancel</button><button class="btn primary" id="f-save">Save item</button></div>
+    <input type="file" id="f-file" accept="image/*" multiple hidden>`, {});
+  const draw = () => {
+    $('#f-imgs', m.el).innerHTML = imgs.map((u, i) => `<div class="im ${i ? '' : 'cover'}" style="background-image:url('${esc(u)}')"><button data-rm="${i}">×</button>${i ? `<u data-cover="${i}">Make cover</u>` : '<em>Cover</em>'}</div>`).join('') + '<div class="addimg" id="f-add">＋ Add photos</div>';
+  };
+  draw();
+  m.el.addEventListener('click', (e) => {
+    const rm = e.target.closest('[data-rm]'), cv = e.target.closest('[data-cover]');
+    if (rm) { imgs.splice(Number(rm.dataset.rm), 1); draw(); }
+    if (cv) { const [u] = imgs.splice(Number(cv.dataset.cover), 1); imgs.unshift(u); draw(); }
+    if (e.target.closest('#f-add')) $('#f-file', m.el).click();
+  });
+  $('#f-file', m.el).onchange = async (e) => {
+    for (const f of e.target.files) { try { imgs.push(await uploadImage(f)); draw(); } catch (err) { toast(err.message, true); } }
+    e.target.value = '';
+  };
+  $('#f-save', m.el).onclick = async () => {
+    const body = { name: $('#f-name', m.el).value, description: $('#f-desc', m.el).value, price: $('#f-price', m.el).value, categoryId: $('#f-cat', m.el).value || null, active: $('#f-active', m.el).checked, images: imgs };
+    const ok = await act(() => it ? api.put(`/api/admin/items/${it.id}`, body) : api.post('/api/admin/items', body), 'Item saved');
+    if (ok) { m.close(); await loadState(); show(); }
+  };
+}
+
+// ============================================================ MENU BUILDER
+function renderBuilder() {
+  if (!S.categories.length) { $('#main').innerHTML = '<h2>Menu Builder</h2><p class="muted">Create a category first.</p>'; return; }
+  const items = S.items.filter((i) => i.categoryId === builderCat);
+  const others = S.items.filter((i) => i.categoryId !== builderCat);
+  $('#main').innerHTML = `<h2>Menu Builder &amp; Tags</h2>
+    <p class="muted">Pick a category, add items from your item list, then set tags, promotion price and customisation (add-ons / options / exclusions) for each.</p>
+    <div class="cattabs">${S.categories.map((c) => `<button data-bcat="${c.id}" class="${c.id === builderCat ? 'on' : ''}">${esc(c.name)} <span style="opacity:.7">(${S.items.filter((i) => i.categoryId === c.id).length})</span>${c.active ? '' : ' ⛔'}</button>`).join('')}</div>
+    <div class="card" style="margin-bottom:14px"><div class="row wrap"><b>Add item to “${esc(catName(builderCat))}”</b>
+      <select id="b-add" class="grow" style="max-width:420px"><option value="">Select an existing item…</option>${others.map((i) => `<option value="${i.id}">${esc(i.name)} — ${fmt(i.price)}${i.categoryId ? ' (now in ' + esc(catName(i.categoryId)) + ')' : ''}</option>`).join('')}</select>
+      <button class="btn primary" id="b-add-go">Add</button><button class="btn" id="b-new">+ Create new item</button></div></div>
+    <div class="card">${items.length ? items.map((it, i) => builderRow(it, i, items.length)).join('') : '<p class="muted">No items in this category yet.</p>'}</div>`;
+}
+function builderRow(it, i, n) {
+  const nOpt = it.groups.length;
+  return `<div class="mb-item">
+    ${itemThumb(it)}
+    <div><b>${esc(it.name)}</b><div class="desc">${esc(it.description) || '<i>No description</i>'}</div>
+      <div style="margin-top:3px"><b>${fmt(it.price)}</b> ${it.promoPrice != null ? `→ <b style="color:var(--red)">${fmt(it.promoPrice)}</b> <span class="chip red">PROMO</span>` : ''}</div></div>
+    <div>
+      <div class="opts">
+        <label class="inline"><input type="checkbox" data-tag="recommended" data-id="${it.id}" ${it.recommended ? 'checked' : ''}> ⭐ Recommended</label>
+        <label class="inline"><input type="checkbox" data-tag="topPick" data-id="${it.id}" ${it.topPick ? 'checked' : ''}> 🔥 Top pick</label>
+        <label class="inline"><input type="checkbox" data-tag="soldOut" data-id="${it.id}" ${it.soldOut ? 'checked' : ''}> Sold out</label>
+        <label class="inline"><input type="checkbox" data-tag="active" data-id="${it.id}" ${it.active ? 'checked' : ''}> Active</label>
+      </div>
+      <div class="promo" style="margin-top:8px">Promo: before <b>${fmt(it.price)}</b> → after
+        <input type="number" min="0" step="0.01" placeholder="none" data-promo="${it.id}" value="${it.promoPrice != null ? it.promoPrice : ''}"><button class="btn sm" data-promo-save="${it.id}">Set</button></div>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+      <button class="btn sm" data-bmove="${it.id}" data-d="-1" ${i === 0 ? 'disabled' : ''}>↑</button><button class="btn sm" data-bmove="${it.id}" data-d="1" ${i === n - 1 ? 'disabled' : ''}>↓</button>
+      <button class="btn sm primary" data-custom="${it.id}">Options${nOpt || it.excludes.length ? ` (${nOpt}+${it.excludes.length})` : ''}</button>
+      <button class="btn sm" data-iedit="${it.id}">Edit</button>
+      <button class="btn sm danger" data-unassign="${it.id}">Remove</button></div></div>`;
+}
+function customModal(it) {
+  let groups = JSON.parse(JSON.stringify(it.groups)), excludes = [...it.excludes];
+  const pool = S.items.filter((x) => x.id !== it.id);
+  const m = modal(`<h2>Options for “${esc(it.name)}”</h2><div id="cm-body"></div>
+    <div class="modal-actions"><button class="btn" data-close>Cancel</button><button class="btn primary" id="cm-save">Save</button></div>`, { wide: true });
+  const draw = () => {
+    $('#cm-body', m.el).innerHTML = `
+      <datalist id="gnames"><option value="ADD ON"><option value="Option"><option value="Soup base"><option value="Sauce"><option value="Side"><option value="Drink"></datalist>
+      <h3>Sub-categories <span class="muted small">(ADD ON / Option / Soup base / Sauce …)</span></h3>
+      ${groups.map((g, gi) => `<div class="grp-card" data-gi="${gi}">
+        <div class="row wrap" style="margin-bottom:8px"><input class="grow" list="gnames" data-gname placeholder="Group name e.g. ADD ON" value="${esc(g.name)}" style="max-width:260px">
+          <label class="inline"><input type="checkbox" data-greq ${g.required ? 'checked' : ''}> Compulsory</label>
+          <label class="inline">Max choose <input type="number" min="0" max="50" data-gmax value="${g.max}" style="width:70px"> <span class="muted small">(0 = unlimited)</span></label>
+          <button class="btn sm danger right" data-gdel>Remove group</button></div>
+        ${g.options.map((o, oi) => `<div class="opt-row" data-oi="${oi}"><span class="nm">${o.itemId ? '🔗 ' : '✏️ '}${o.itemId ? esc(o.name) : `<input data-oname value="${esc(o.name)}">`}</span>
+          <input type="number" min="0" step="0.01" data-oprice value="${o.price}" title="Price (editable)"><button class="btn sm danger" data-odel>×</button></div>`).join('')}
+        <div class="row wrap" style="margin-top:8px"><select data-opick style="max-width:320px"><option value="">+ Add existing item as option…</option>${pool.map((x) => `<option value="${x.id}">${esc(x.name)} — ${fmt(x.price)}</option>`).join('')}</select>
+          <button class="btn sm" data-ocustom>+ Custom option</button></div></div>`).join('') || '<p class="muted">No groups yet.</p>'}
+      <button class="btn" data-gadd>+ Add sub-category</button>
+      <h3 style="margin-top:20px">Exclude / remove ingredients</h3>
+      <div class="tagbox">${excludes.map((e, i) => `<span class="chip">No ${esc(e)}<button data-exdel="${i}">×</button></span>`).join('')}</div>
+      <div class="row"><input id="ex-in" placeholder="Ingredient customers can remove, e.g. Spring Onions" style="max-width:340px"><button class="btn" id="ex-add">Add</button></div>`;
+  };
+  draw();
+  const sync = () => { // pull input values into model before redraw
+    $$('.grp-card', m.el).forEach((card) => {
+      const g = groups[Number(card.dataset.gi)];
+      g.name = $('[data-gname]', card).value; g.required = $('[data-greq]', card).checked; g.max = Number($('[data-gmax]', card).value) || 0;
+      $$('.opt-row', card).forEach((row) => { const o = g.options[Number(row.dataset.oi)]; o.price = Number($('[data-oprice]', row).value) || 0; const n = $('[data-oname]', row); if (n) o.name = n.value; });
+    });
+  };
+  m.el.addEventListener('click', (e) => {
+    const t = e.target, card = t.closest('.grp-card'), g = card && groups[Number(card.dataset.gi)];
+    if (t.closest('[data-gadd]')) { sync(); groups.push({ id: '', name: groups.length ? 'Option' : 'ADD ON', required: false, max: 0, options: [] }); draw(); }
+    else if (t.closest('[data-gdel]')) { sync(); groups.splice(Number(card.dataset.gi), 1); draw(); }
+    else if (t.closest('[data-odel]')) { sync(); g.options.splice(Number(t.closest('.opt-row').dataset.oi), 1); draw(); }
+    else if (t.closest('[data-ocustom]')) { sync(); g.options.push({ id: '', itemId: null, name: '', price: 0 }); draw(); }
+    else if (t.closest('[data-exdel]')) { excludes.splice(Number(t.closest('[data-exdel]').dataset.exdel), 1); sync(); draw(); }
+    else if (t.closest('#ex-add')) { const v = $('#ex-in', m.el).value.trim(); if (v && !excludes.includes(v)) { sync(); excludes.push(v); draw(); $('#ex-in', m.el).focus(); } }
+  });
+  m.el.addEventListener('change', (e) => {
+    const sel = e.target.closest('[data-opick]'); if (!sel || !sel.value) return;
+    sync(); const card = sel.closest('.grp-card'), g = groups[Number(card.dataset.gi)], src = S.items.find((x) => x.id === sel.value);
+    if (g.options.some((o) => o.itemId === src.id)) toast('Already added', true);
+    else g.options.push({ id: '', itemId: src.id, name: src.name, price: src.price }); // default price = item price, editable
+    draw();
+  });
+  m.el.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.id === 'ex-in') { e.preventDefault(); $('#ex-add', m.el).click(); } });
+  $('#cm-save', m.el).onclick = async () => {
+    sync();
+    const ok = await act(() => api.put(`/api/admin/items/${it.id}`, { groups, excludes }), 'Options saved');
+    if (ok) { m.close(); await loadState(); show(); }
+  };
+}
+
+// ============================================================ TABLES
+function tableUrl(t) { return `${(S.settings.publicUrl || location.origin)}/customer?table=${encodeURIComponent(t.id)}`; }
+function renderTables() {
+  $('#main').innerHTML = `<div class="row wrap" style="margin-bottom:14px"><h2 style="margin:0">Tables &amp; QR codes</h2><div class="right row"><button class="btn" id="qr-printall">🖨 Print all QR</button><button class="btn primary" id="tbl-new">+ New table</button></div></div>
+    <p class="muted">Each table has its own QR code. Customers scan it to open the digital menu for that table. ${S.settings.publicUrl ? '' : `QR codes currently point to <b>${esc(location.origin)}</b> — set a <i>Public base URL</i> in Settings once deployed.`}</p>
+    <div class="qr-grid">${S.tables.map((t) => `<div class="card qr-card"><div class="row"><h3 style="margin:0">${esc(t.name)}</h3>${S.openTableIds.includes(t.id) ? '<span class="chip green">in use</span>' : ''}<span class="right">${sw(`data-tactive="${t.id}"`, t.active)}</span></div>
+      <div class="qr" data-qr="${esc(t.id)}"></div><div class="lnk"><a href="${esc(tableUrl(t))}" target="_blank">${esc(tableUrl(t))}</a></div>
+      <div class="row" style="justify-content:center;margin-top:8px"><button class="btn sm" data-tedit="${t.id}">Rename</button><button class="btn sm danger" data-tdel="${t.id}">Delete</button></div></div>`).join('')}</div>`;
+  $$('[data-qr]').forEach((el) => makeQR(el, tableUrl(S.tables.find((t) => t.id === el.dataset.qr)), 140));
+}
+function makeQR(el, url, size) {
+  if (window.QRCode) new QRCode(el, { text: url, width: size, height: size, correctLevel: QRCode.CorrectLevel.M });
+  else el.innerHTML = '<span class="muted small">QR library unavailable offline —<br>use the link below</span>';
+}
+function printAllQR() {
+  const box = $('#qr-print'); box.innerHTML = '';
+  S.tables.filter((t) => t.active).forEach((t) => {
+    const c = document.createElement('div'); c.className = 'qr-card';
+    c.innerHTML = `<div>${esc(S.settings.name)}</div><h2>Table ${esc(t.name)}</h2><div class="qr"></div><div>Scan to view menu &amp; order</div>`;
+    box.appendChild(c); makeQR($('.qr', c), tableUrl(t), 180);
+  });
+  setTimeout(() => window.print(), 300);
+}
+
+// ============================================================ SETTINGS
+function renderSettings() {
+  const s = S.settings;
+  $('#main').innerHTML = `<h2>Charges &amp; Settings</h2>
+    <div class="card" style="margin-bottom:16px;max-width:760px"><h3>Restaurant</h3>
+      <div class="row wrap"><label class="field grow">Restaurant name<input id="s-name" value="${esc(s.name)}"></label><label class="field" style="width:110px">Currency<input id="s-cur" value="${esc(s.currency)}" maxlength="5"></label></div>
+      <label class="field">Public base URL for QR codes <span class="muted small">(optional, e.g. https://menu.myrestaurant.com)</span><input id="s-url" value="${esc(s.publicUrl)}" placeholder="${esc(location.origin)}"></label></div>
+    <div class="card" style="margin-bottom:16px;max-width:760px"><h3>Additional charges</h3><p class="muted small">Applied on the subtotal of every bill (customer cart, order status, receipt). Toggle off for “none”.</p>
+      <div id="chg">${s.charges.map(chargeRow).join('')}</div><button class="btn" id="chg-add">+ Add charge (SST / GST / Service charge …)</button></div>
+    <div class="card" style="margin-bottom:16px;max-width:760px"><h3>Staff PINs</h3><p class="muted small">Leave blank to keep the current PIN. 4–8 digits.</p>
+      <div class="row wrap">${['admin', 'kitchen', 'cashier'].map((r) => `<label class="field grow">${r[0].toUpperCase() + r.slice(1)} PIN<input data-pin="${r}" type="password" inputmode="numeric" maxlength="8" placeholder="••••"></label>`).join('')}</div></div>
+    <button class="btn primary lg" id="s-save">Save settings</button>`;
+}
+function chargeRow(c) {
+  return `<div class="row wrap" data-charge="${esc(c.id)}" style="margin-bottom:8px"><input class="grow" data-cn placeholder="Name e.g. SST" value="${esc(c.name)}" style="max-width:220px">
+    <select data-ct style="width:130px"><option value="percent" ${c.type === 'percent' ? 'selected' : ''}>Percent %</option><option value="fixed" ${c.type === 'fixed' ? 'selected' : ''}>Fixed amount</option></select>
+    <input type="number" min="0" step="0.01" data-cv value="${c.value}" style="width:100px">${sw('data-ca', c.active)}<button class="btn sm danger" data-cdelrow>×</button></div>`;
+}
+
+// ============================================================ events
+document.addEventListener('click', async (e) => {
+  const t = e.target;
+  let b;
+  if ((b = t.closest('.side [data-tab]'))) return show(b.dataset.tab);
+  if (t.closest('#logout')) return api.logout();
+  if ((b = t.closest('[data-period]'))) { period = b.dataset.period; return renderDash(); }
+  if (t.closest('#demo-add')) { if (await act(() => api.post('/api/admin/demo-sales'), 'Demo sales generated')) renderDash(); return; }
+  if (t.closest('#demo-del')) { if (confirm('Remove all demo sales?') && await act(() => api.del('/api/admin/demo-sales'), 'Demo sales removed')) renderDash(); return; }
+  // categories
+  if (t.closest('#cat-new')) return catModal();
+  if ((b = t.closest('[data-cedit]'))) return catModal(S.categories.find((c) => c.id === b.dataset.cedit));
+  if ((b = t.closest('[data-cdel]'))) { if (confirm('Delete this category?') && await act(() => api.del(`/api/admin/categories/${b.dataset.cdel}`), 'Deleted')) { await loadState(); show(); } return; }
+  if ((b = t.closest('[data-cmove]'))) {
+    const ids = S.categories.map((c) => c.id), i = ids.indexOf(b.dataset.cmove), j = i + Number(b.dataset.d);
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    if (await act(() => api.post('/api/admin/categories/reorder', { ids }))) { await loadState(); show(); } return;
+  }
+  // items
+  if (t.closest('#item-new')) return itemModal();
+  if ((b = t.closest('[data-iedit]'))) return itemModal(S.items.find((i) => i.id === b.dataset.iedit));
+  if ((b = t.closest('[data-idel]'))) { if (confirm('Delete this item? Past sales keep their history.') && await act(() => api.del(`/api/admin/items/${b.dataset.idel}`), 'Deleted')) { await loadState(); show(); } return; }
+  // builder
+  if ((b = t.closest('[data-bcat]'))) { builderCat = b.dataset.bcat; return renderBuilder(); }
+  if (t.closest('#b-add-go')) {
+    const id = $('#b-add').value; if (!id) return toast('Select an item first', true);
+    if (await act(() => api.put(`/api/admin/items/${id}`, { categoryId: builderCat }), 'Item added')) { await loadState(); renderBuilder(); } return;
+  }
+  if (t.closest('#b-new')) return itemModal(null, builderCat);
+  if ((b = t.closest('[data-unassign]'))) { if (await act(() => api.put(`/api/admin/items/${b.dataset.unassign}`, { categoryId: null }), 'Removed from category')) { await loadState(); renderBuilder(); } return; }
+  if ((b = t.closest('[data-custom]'))) return customModal(S.items.find((i) => i.id === b.dataset.custom));
+  if ((b = t.closest('[data-promo-save]'))) {
+    const id = b.dataset.promoSave, v = $(`[data-promo="${id}"]`).value;
+    if (await act(() => api.put(`/api/admin/items/${id}`, { promoPrice: v === '' ? null : v }), v === '' ? 'Promotion cleared' : 'Promotion set')) { await loadState(); renderBuilder(); } return;
+  }
+  if ((b = t.closest('[data-bmove]'))) {
+    const list = S.items.filter((i) => i.categoryId === builderCat).map((i) => i.id), i = list.indexOf(b.dataset.bmove), j = i + Number(b.dataset.d);
+    [list[i], list[j]] = [list[j], list[i]];
+    if (await act(() => api.post(`/api/admin/categories/${builderCat}/reorder`, { ids: list }))) { await loadState(); renderBuilder(); } return;
+  }
+  // tables
+  if (t.closest('#tbl-new')) {
+    const m = modal(`<h2>New table</h2><label class="field">Table name / number<input id="f-name" maxlength="20" placeholder="e.g. A11"></label><div class="modal-actions"><button class="btn" data-close>Cancel</button><button class="btn primary" id="f-save">Add</button></div>`);
+    $('#f-name', m.el).focus();
+    $('#f-save', m.el).onclick = async () => { if (await act(() => api.post('/api/admin/tables', { name: $('#f-name', m.el).value }), 'Table added')) { m.close(); await loadState(); show(); } };
+    return;
+  }
+  if ((b = t.closest('[data-tedit]'))) { const nm = prompt('New table name', S.tables.find((x) => x.id === b.dataset.tedit).name); if (nm && await act(() => api.put(`/api/admin/tables/${b.dataset.tedit}`, { name: nm }), 'Renamed')) { await loadState(); show(); } return; }
+  if ((b = t.closest('[data-tdel]'))) { if (confirm('Delete this table? (its QR code will stop working)') && await act(() => api.del(`/api/admin/tables/${b.dataset.tdel}`), 'Deleted')) { await loadState(); show(); } return; }
+  if (t.closest('#qr-printall')) return printAllQR();
+  // settings
+  if (t.closest('#chg-add')) { $('#chg').insertAdjacentHTML('beforeend', chargeRow({ id: '', name: '', type: 'percent', value: 0, active: true })); return; }
+  if ((b = t.closest('[data-cdelrow]'))) { b.closest('[data-charge]').remove(); return; }
+  if (t.closest('#s-save')) {
+    const charges = $$('[data-charge]').map((r) => ({ id: r.dataset.charge, name: $('[data-cn]', r).value, type: $('[data-ct]', r).value, value: $('[data-cv]', r).value, active: $('[data-ca]', r).checked }));
+    const pins = {}; $$('[data-pin]').forEach((i) => { pins[i.dataset.pin] = i.value; });
+    if (await act(() => api.put('/api/admin/settings', { name: $('#s-name').value, currency: $('#s-cur').value, publicUrl: $('#s-url').value, charges, pins }), 'Settings saved')) { await loadState(); show(); }
+  }
+});
+document.addEventListener('change', async (e) => {
+  const t = e.target;
+  if (t.dataset.cactive) { await act(() => api.put(`/api/admin/categories/${t.dataset.cactive}`, { active: t.checked })); await loadState(); return; }
+  if (t.dataset.iactive) { await act(() => api.put(`/api/admin/items/${t.dataset.iactive}`, { active: t.checked })); await loadState(); return; }
+  if (t.dataset.tactive) { await act(() => api.put(`/api/admin/tables/${t.dataset.tactive}`, { active: t.checked })); await loadState(); return; }
+  if (t.dataset.tag) { await act(() => api.put(`/api/admin/items/${t.dataset.id}`, { [t.dataset.tag]: t.checked })); await loadState(); return; }
+});
+$('#logout').onclick = () => api.logout();
+requireLogin(api, 'Administrator', () => { boot(); if (!window._live) window._live = live(() => { if (tab === 'dash' && !document.querySelector('.modal-bg')) renderDash(); }); });
+</script>
+</body>
+</html>

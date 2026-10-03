@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FnB Ordering Platform</title><link rel="stylesheet" href="/shared.css">
+<style>
+ body{display:grid;place-items:center;min-height:100vh;padding:20px;background:linear-gradient(160deg,#0f3f34,#17594a)}
+ .wrap{max-width:760px;width:100%}.wrap h1{color:#fff;text-align:center;font-size:28px}.wrap>p{color:#cfe6de;text-align:center;margin-bottom:22px}
+ .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+ a.tile{background:#fff;border-radius:16px;padding:18px;text-decoration:none;color:inherit;display:block}
+ a.tile:hover{transform:translateY(-2px);box-shadow:0 10px 30px rgba(0,0,0,.25)}
+ .tile b{font-size:18px}.tile code{display:block;background:#f1f5f4;border-radius:6px;padding:4px 8px;margin:8px 0 4px;font-size:13px;word-break:break-all}
+</style></head><body><div class="wrap">
+<h1>🍜 FnB Digital Ordering Platform</h1><p>Four role-based URLs. Staff portals are protected by a PIN (see README).</p>
+<div class="grid">
+ <a class="tile" id="c" href="/customer?table=A1"><b>📱 Customer app</b><code></code><span class="muted small">Scan the table QR → choose pax / take-away → order. Opens table A1 as a demo.</span></a>
+ <a class="tile" id="a" href="/admin"><b>🖥 Administrator portal</b><code></code><span class="muted small">Desktop: categories, items, menu builder, tables &amp; QR, charges, sales dashboard.</span></a>
+ <a class="tile" id="k" href="/kitchen"><b>👨‍🍳 Kitchen display</b><code></code><span class="muted small">iPad: live order queue per table → start / complete.</span></a>
+ <a class="tile" id="x" href="/cashier"><b>💳 Cashier</b><code></code><span class="muted small">iPad: bill per table → print receipt → complete payment.</span></a>
+</div></div>
+<script>for(const [id,p] of [['c','/customer?table=A1'],['a','/admin'],['k','/kitchen'],['x','/cashier']])document.querySelector('#'+id+' code').textContent=location.origin+p</script>
+</body></html>

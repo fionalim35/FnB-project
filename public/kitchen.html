@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kitchen Display</title>
+<link rel="stylesheet" href="/shared.css">
+<style>
+  body { background: #20262a; }
+  .topbar { background: #111619; }
+  .tabs { display: flex; gap: 8px; padding: 12px 18px; }
+  .tab { background: #2d363b; color: #cdd6d2; border: 0; border-radius: 99px; padding: 10px 18px; font-weight: 700; font-size: 15px; cursor: pointer; }
+  .tab.on { background: var(--green); color: #fff; }
+  .tab b { background: rgba(255,255,255,.2); border-radius: 99px; padding: 1px 8px; margin-left: 6px; }
+  .board { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; padding: 0 18px 30px; align-items: start; }
+  .ticket { background: #fff; border-radius: 14px; overflow: hidden; border-top: 8px solid var(--blue); }
+  .ticket.cooking { border-top-color: var(--orange); }
+  .ticket.done { border-top-color: #9aa5a1; opacity: .75; }
+  .ticket.late { box-shadow: 0 0 0 3px var(--red); }
+  .t-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px 6px; }
+  .t-table { font-size: 30px; font-weight: 800; line-height: 1; }
+  .t-meta { padding: 0 14px 8px; color: var(--muted); font-size: 13px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .timer { margin-left: auto; font-weight: 800; font-size: 18px; }
+  .late .timer { color: var(--red); }
+  .t-lines { padding: 4px 14px 10px; border-top: 1px dashed var(--line); }
+  .ln { padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .ln:last-child { border-bottom: 0; }
+  .ln .q { display: inline-block; min-width: 34px; font-weight: 800; font-size: 20px; color: var(--green); }
+  .ln .n { font-weight: 700; font-size: 17px; }
+  .sub { margin: 3px 0 0 38px; font-size: 14px; }
+  .sub .add { color: #1d5db7; font-weight: 600; }
+  .sub .no { color: var(--red); font-weight: 700; }
+  .sub .note { background: #fff3d6; color: #7a4c00; padding: 4px 8px; border-radius: 6px; display: inline-block; font-weight: 600; margin-top: 3px; }
+  .t-note { margin: 0 14px 10px; background: #fff3d6; color: #7a4c00; padding: 8px 10px; border-radius: 8px; font-weight: 600; }
+  .t-act { display: flex; gap: 8px; padding: 10px 14px 14px; background: #f7f9f8; }
+  .t-act .btn { flex: 1; padding: 14px; font-size: 17px; }
+  .empty { color: #8a9893; text-align: center; padding: 70px 20px; grid-column: 1/-1; font-size: 18px; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <h1>👨‍🍳 Kitchen Display</h1><span id="rest" class="muted"></span>
+  <span class="right row"><span class="dot"></span><span id="clock"></span>
+  <button class="btn" id="sound">🔔 Sound on</button><button class="btn" id="logout">Log out</button></span>
+</div>
+<div class="tabs" id="tabs"></div>
+<div class="board" id="board"></div>
+
+<script src="/shared.js"></script>
+<script>
+const api = createApi('kitchen');
+let orders = [], tab = 'queue', soundOn = true, known = null;
+const LATE_MIN = 15;
+
+function beep() {
+  if (!soundOn) return;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination); o.frequency.value = 880; g.gain.value = .15;
+    o.start(); o.stop(ctx.currentTime + .25);
+  } catch {}
+}
+async function load() {
+  try {
+    const d = await api.get('/api/kitchen/orders');
+    orders = d.orders;
+    const ids = new Set(orders.map((o) => o.id));
+    if (known && orders.some((o) => o.status === 'new' && !known.has(o.id))) beep();
+    known = ids;
+    render();
+  } catch (e) { if (api.token) toast(e.message, true); }
+}
+function mins(t) { return Math.floor((Date.now() - t) / 60000); }
+function render() {
+  const queue = orders.filter((o) => o.status !== 'done');
+  const done = orders.filter((o) => o.status === 'done').sort((a, b) => b.doneAt - a.doneAt);
+  $('#tabs').innerHTML = `<button class="tab ${tab === 'queue' ? 'on' : ''}" data-tab="queue">Queue<b>${queue.length}</b></button>
+    <button class="tab ${tab === 'done' ? 'on' : ''}" data-tab="done">Completed (6h)<b>${done.length}</b></button>`;
+  const list = tab === 'queue' ? queue : done;
+  $('#board').innerHTML = list.length ? list.map(ticket).join('') : `<div class="empty">${tab === 'queue' ? '🎉 No orders waiting' : 'Nothing completed yet'}</div>`;
+}
+function ticket(o) {
+  const late = o.status !== 'done' && mins(o.createdAt) >= LATE_MIN;
+  const lines = o.lines.map((l) => `<div class="ln"><span class="q">${l.qty}×</span><span class="n">${esc(l.name)}</span>
+    <div class="sub">${l.selections.map((s) => `<div class="add">+ ${esc(s.name)} <span class="muted small">(${esc(s.group)})</span></div>`).join('')}
+    ${l.excludes.length ? `<div class="no">NO: ${l.excludes.map(esc).join(', ')}</div>` : ''}
+    ${l.note ? `<div class="note">📝 ${esc(l.note)}</div>` : ''}</div></div>`).join('');
+  const act = o.status === 'new'
+    ? `<button class="btn" data-act="cooking" data-id="${o.id}">▶ Start cooking</button><button class="btn primary" data-act="done" data-id="${o.id}">✔ Complete</button>`
+    : o.status === 'cooking'
+      ? `<button class="btn primary" data-act="done" data-id="${o.id}">✔ Complete &amp; served</button>`
+      : `<button class="btn" data-act="new" data-id="${o.id}">↩ Recall</button>`;
+  return `<div class="ticket ${o.status} ${late ? 'late' : ''}">
+    <div class="t-head"><span class="t-table">${esc(o.tableName)}</span>
+      <span class="chip ${o.type === 'takeaway' ? 'orange' : 'green'}">${o.type === 'takeaway' ? 'TAKEAWAY' : 'DINE-IN'}</span>
+      <span class="chip ${o.status === 'new' ? 'blue' : o.status === 'cooking' ? 'orange' : ''}">${o.status.toUpperCase()}</span>
+      <span class="timer">${o.status === 'done' ? '✔ ' + fmtTime(o.doneAt) : mins(o.createdAt) + ' min'}</span></div>
+    <div class="t-meta"><span>Bill ${esc(o.billNo)}</span><span>· Ordered ${fmtTime(o.createdAt)}</span></div>
+    ${o.note ? `<div class="t-note">📝 ${esc(o.note)}</div>` : ''}
+    <div class="t-lines">${lines}</div><div class="t-act">${act}</div></div>`;
+}
+document.addEventListener('click', async (e) => {
+  const t = e.target.closest('[data-tab]'); if (t) { tab = t.dataset.tab; return render(); }
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  b.disabled = true;
+  try { await api.post(`/api/kitchen/orders/${b.dataset.id}/status`, { status: b.dataset.act }); await load(); }
+  catch (err) { toast(err.message, true); b.disabled = false; }
+});
+$('#sound').onclick = (e) => { soundOn = !soundOn; e.target.textContent = soundOn ? '🔔 Sound on' : '🔕 Sound off'; if (soundOn) beep(); };
+$('#logout').onclick = () => api.logout();
+setInterval(() => { $('#clock').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); if (orders.length) render(); }, 30000);
+$('#clock').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+requireLogin(api, 'Kitchen Display', () => { load(); if (!window._live) window._live = live(load); });
+</script>
+</body>
+</html>

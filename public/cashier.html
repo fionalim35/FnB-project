@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cashier</title>
+<link rel="stylesheet" href="/shared.css">
+<style>
+  .layout { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(360px, 460px); gap: 16px; padding: 16px 18px; align-items: start; }
+  @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+  .tgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+  .tcard { background: #fff; border: 2px solid var(--line); border-radius: 14px; padding: 14px; text-align: left; cursor: pointer; min-height: 112px; display: flex; flex-direction: column; gap: 4px; }
+  .tcard .nm { font-size: 26px; font-weight: 800; }
+  .tcard.busy { border-color: var(--green); background: var(--green-l); }
+  .tcard.req { border-color: var(--orange); background: #fff7e0; animation: pulse 1.4s infinite; }
+  .tcard.sel { outline: 4px solid var(--blue); }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(245,158,11,.25); } }
+  .panel { position: sticky; top: 70px; }
+  .bill-line { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px dashed var(--line); }
+  .bill-line .q { font-weight: 800; color: var(--green); min-width: 28px; }
+  .bill-line .x { font-size: 12.5px; color: var(--muted); }
+  .sumrow { display: flex; justify-content: space-between; padding: 4px 0; }
+  .sumrow.total { font-size: 24px; font-weight: 800; border-top: 2px solid var(--ink); margin-top: 6px; padding-top: 10px; }
+  .methods { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0; }
+  .methods button { padding: 12px 4px; border-radius: 10px; border: 2px solid var(--line); background: #fff; font-weight: 700; cursor: pointer; }
+  .methods button.on { border-color: var(--green); background: var(--green-l); color: var(--green); }
+  .hist { max-height: 260px; overflow: auto; }
+
+  /* receipt (80mm thermal style) */
+  #receipt { display: none; }
+  @media print {
+    body > *:not(#receipt) { display: none !important; }
+    #receipt { display: block; width: 72mm; margin: 0 auto; font: 12px/1.35 "Courier New", monospace; color: #000; }
+    @page { margin: 4mm; }
+  }
+  #receipt h2 { text-align: center; font-size: 16px; margin: 0 0 4px; }
+  #receipt .c { text-align: center; }
+  #receipt hr { border: 0; border-top: 1px dashed #000; margin: 6px 0; }
+  #receipt .r { display: flex; justify-content: space-between; gap: 6px; }
+  #receipt .sm { font-size: 11px; padding-left: 10px; }
+</style>
+</head>
+<body>
+<div class="topbar no-print">
+  <h1>💳 Cashier</h1><span id="rest" class="muted"></span>
+  <span class="right row"><span class="dot"></span><button class="btn" id="logout">Log out</button></span>
+</div>
+<div class="layout no-print">
+  <div>
+    <div class="row" style="margin-bottom:10px"><h2 style="margin:0">Tables</h2><span class="muted small right"><span class="chip green">Dining</span> <span class="chip orange">Asked for bill</span></span></div>
+    <div class="tgrid" id="tables"></div>
+    <div class="card" style="margin-top:18px">
+      <div class="row"><h3 style="margin:0">Today's payments</h3><b class="right" id="hist-total"></b></div>
+      <div class="hist" id="hist"></div>
+    </div>
+  </div>
+  <div class="panel card" id="panel"><p class="muted" style="text-align:center;padding:40px 0">Select a table to view its bill</p></div>
+</div>
+<div id="receipt"></div>
+
+<script src="/shared.js"></script>
+<script>
+const api = createApi('cashier');
+let tables = [], sel = null, bill = null, rest = {}, method = 'Cash', history = { bills: [], total: 0 };
+
+async function load() {
+  try {
+    const [t, h] = await Promise.all([api.get('/api/cashier/tables'), api.get('/api/cashier/history')]);
+    tables = t.tables; history = h; renderTables(); renderHistory();
+    if (sel) {
+      const cur = tables.find((x) => x.id === sel);
+      if (cur && cur.bill) await openBill(cur.bill.id, true);
+      else if (bill && bill.status === 'open') { bill = null; sel = null; renderPanel(); }
+    }
+  } catch (e) { if (api.token) toast(e.message, true); }
+}
+function renderTables() {
+  $('#tables').innerHTML = tables.map((t) => {
+    const b = t.bill;
+    const cls = b ? (b.billRequested ? 'req' : 'busy') : '';
+    return `<button class="tcard ${cls} ${sel === t.id ? 'sel' : ''}" data-table="${esc(t.id)}">
+      <span class="nm">${esc(t.name)}</span>
+      ${b ? `<b>${fmt(b.total)}</b><span class="small muted">${b.type === 'takeaway' ? 'Takeaway' : b.pax + ' pax'} · ${b.orders} order(s)</span>
+        ${b.billRequested ? '<span class="chip orange">🔔 Bill requested</span>' : b.pending ? `<span class="chip blue">${b.pending} in kitchen</span>` : '<span class="chip green">All served</span>'}`
+      : '<span class="muted small">Available</span>'}</button>`;
+  }).join('');
+}
+function renderHistory() {
+  $('#hist-total').textContent = fmt(history.total);
+  $('#hist').innerHTML = history.bills.length ? `<table class="tbl">${history.bills.map((b) =>
+    `<tr><td>${esc(b.no)}<div class="muted small">${fmtTime(b.at)} · ${esc(b.method)}</div></td><td>${esc(b.tableName)}</td><td style="text-align:right"><b>${fmt(b.total)}</b></td>
+     <td><button class="btn sm" data-reprint="${b.id}">Reprint</button></td></tr>`).join('')}</table>` : '<p class="muted">No payments yet today.</p>';
+}
+async function openBill(id, quiet) {
+  const d = await api.get(`/api/cashier/bills/${id}`);
+  bill = d.bill; rest = d.restaurant; CUR = rest.currency; renderPanel(quiet);
+}
+function lineRows(b) {
+  const lines = [];
+  b.orders.forEach((o) => o.lines.forEach((l) => lines.push({ l, status: o.status })));
+  return lines;
+}
+function renderPanel() {
+  const keepTender = $('#tender') ? $('#tender').value : '';
+  if (!bill) { $('#panel').innerHTML = '<p class="muted" style="text-align:center;padding:40px 0">Select a table to view its bill</p>'; return; }
+  const b = bill, paid = b.status === 'paid';
+  const rows = lineRows(b).map(({ l, status }) => `<div class="bill-line"><span class="q">${l.qty}×</span>
+    <div class="grow"><div>${esc(l.name)} ${status !== 'done' && !paid ? '<span class="chip blue">in kitchen</span>' : ''}</div>
+    <div class="x">${l.selections.map((s) => '+ ' + esc(s.name)).join(', ')} ${l.excludes.length ? 'NO ' + l.excludes.map(esc).join(', ') : ''}</div></div>
+    <b>${fmt(l.qty * l.unitPrice)}</b></div>`).join('');
+  const sums = `<div class="sumrow"><span>Subtotal</span><span>${fmt(b.subtotal)}</span></div>
+    ${b.charges.map((c) => `<div class="sumrow"><span>${esc(c.name)}</span><span>${fmt(c.amount)}</span></div>`).join('')}
+    <div class="sumrow total"><span>Total</span><span>${fmt(b.total)}</span></div>`;
+  $('#panel').innerHTML = `
+    <div class="row"><h2 style="margin:0">Table ${esc(b.tableName)}</h2><span class="chip ${paid ? 'green' : 'orange'} right">${paid ? 'PAID' : 'OPEN'}</span></div>
+    <div class="muted small" style="margin-bottom:8px">Bill ${esc(b.no)} · ${b.type === 'takeaway' ? 'Takeaway' : b.pax + ' diner(s)'} · opened ${fmtTime(b.createdAt)}</div>
+    ${rows || '<p class="muted">No items ordered yet.</p>'}${sums}
+    ${paid ? `<p class="muted">Paid by ${esc(b.paid.method)} at ${fmtTime(b.paid.at)}</p>
+        <button class="btn lg" style="width:100%" data-print>🖨 Reprint receipt</button>`
+      : b.orders.length ? `
+        <button class="btn lg" style="width:100%;margin-top:12px" data-print>🖨 Print receipt</button>
+        <div class="methods">${['Cash', 'Card', 'E-Wallet', 'QR Pay'].map((m) => `<button data-method="${m}" class="${method === m ? 'on' : ''}">${m}</button>`).join('')}</div>
+        ${method === 'Cash' ? `<label class="field">Cash received (optional)<input id="tender" type="number" inputmode="decimal" min="0" step="0.01" placeholder="${b.total.toFixed(2)}"></label><div id="chg" class="muted" style="margin:-6px 0 10px"></div>` : ''}
+        <button class="btn primary lg" style="width:100%" data-pay>✔ Complete payment</button>`
+      : `<button class="btn danger lg" style="width:100%;margin-top:12px" data-clear>Clear empty table</button>`}`;
+  if (keepTender && $('#tender')) { $('#tender').value = keepTender; $('#tender').dispatchEvent(new Event('input', { bubbles: true })); }
+}
+function printReceipt() {
+  const b = bill;
+  const lines = lineRows(b).map(({ l }) => `<div class="r"><span>${l.qty} ${esc(l.name)}</span><span>${(l.qty * l.unitPrice).toFixed(2)}</span></div>
+    ${l.selections.map((s) => `<div class="sm">+ ${esc(s.name)}${s.price ? ' ' + s.price.toFixed(2) : ''}</div>`).join('')}
+    ${l.excludes.length ? `<div class="sm">NO ${l.excludes.map(esc).join(', ')}</div>` : ''}`).join('');
+  $('#receipt').innerHTML = `<h2>${esc(rest.name)}</h2><div class="c">RECEIPT</div><hr>
+    <div class="r"><span>Bill</span><span>${esc(b.no)}</span></div>
+    <div class="r"><span>Table</span><span>${esc(b.tableName)} ${b.type === 'takeaway' ? '(Takeaway)' : '(' + b.pax + ' pax)'}</span></div>
+    <div class="r"><span>Date</span><span>${fmtDateTime(b.paid ? b.paid.at : Date.now())}</span></div><hr>${lines}<hr>
+    <div class="r"><span>Subtotal</span><span>${b.subtotal.toFixed(2)}</span></div>
+    ${b.charges.map((c) => `<div class="r"><span>${esc(c.name)}</span><span>${c.amount.toFixed(2)}</span></div>`).join('')}
+    <div class="r" style="font-size:15px;font-weight:bold"><span>TOTAL (${esc(CUR)})</span><span>${b.total.toFixed(2)}</span></div>
+    ${b.paid ? `<hr><div class="r"><span>Paid (${esc(b.paid.method)})</span><span>${b.total.toFixed(2)}</span></div>
+      ${b.paid.change != null ? `<div class="r"><span>Cash</span><span>${b.paid.tendered.toFixed(2)}</span></div><div class="r"><span>Change</span><span>${b.paid.change.toFixed(2)}</span></div>` : ''}` : ''}
+    <hr><div class="c">Thank you! Please come again.</div>`;
+  window.print();
+  api.post(`/api/cashier/bills/${b.id}/printed`).catch(() => {});
+}
+document.addEventListener('click', async (e) => {
+  const t = e.target.closest('[data-table]');
+  if (t) {
+    sel = t.dataset.table; renderTables();
+    const tb = tables.find((x) => x.id === sel);
+    if (tb && tb.bill) { try { await openBill(tb.bill.id); } catch (err) { toast(err.message, true); } }
+    else { bill = null; $('#panel').innerHTML = `<h2>Table ${esc(tb.name)}</h2><p class="muted">No active bill. Customers start a bill by scanning the table QR code.</p>`; }
+    return;
+  }
+  const rp = e.target.closest('[data-reprint]');
+  if (rp) { try { await openBill(rp.dataset.reprint); printReceipt(); } catch (err) { toast(err.message, true); } return; }
+  const m = e.target.closest('[data-method]'); if (m) { method = m.dataset.method; renderPanel(); return; }
+  if (e.target.closest('[data-print]')) return printReceipt();
+  const pay = e.target.closest('[data-pay]');
+  if (pay) {
+    pay.disabled = true;
+    try {
+      const tender = $('#tender') ? $('#tender').value : '';
+      const d = await api.post(`/api/cashier/bills/${bill.id}/pay`, { method, tendered: tender });
+      bill = d.bill; renderPanel();
+      toast(d.bill.paid.change != null ? `Paid. Change: ${fmt(d.bill.paid.change)}` : 'Payment completed. Table refreshed.');
+      sel = null; await load();
+      if (confirm('Payment completed. Print the paid receipt?')) printReceipt();
+    } catch (err) { toast(err.message, true); pay.disabled = false; }
+    return;
+  }
+  if (e.target.closest('[data-clear]')) {
+    try { await api.post(`/api/cashier/bills/${bill.id}/clear`); bill = null; sel = null; renderPanel(); load(); toast('Table cleared'); }
+    catch (err) { toast(err.message, true); }
+  }
+});
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'tender' || !bill) return;
+  const v = Number(e.target.value);
+  $('#chg').textContent = v >= bill.total ? `Change: ${fmt(v - bill.total)}` : v ? 'Less than total' : '';
+});
+$('#logout').onclick = () => api.logout();
+requireLogin(api, 'Cashier', () => { load(); if (!window._live) window._live = live(load); });
+</script>
+</body>
+</html>

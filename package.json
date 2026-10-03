@@ -1,0 +1,13 @@
+{
+  "name": "fnb-digital-ordering",
+  "version": "1.0.0",
+  "description": "QR table ordering platform for F&B: customer app, kitchen display, cashier and admin portal",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/smoke.js"
+  },
+  "engines": { "node": ">=18" },
+  "license": "UNLICENSED",
+  "private": true
+}
