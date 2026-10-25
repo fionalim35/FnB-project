@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Book an appointment</title>
+<link rel="stylesheet" href="/common.css">
+<style>
+body{padding-bottom:84px}
+#app{max-width:640px;margin:0 auto;padding:12px}
+.hero{display:flex;gap:14px;align-items:center}
+.hero .thumb{width:68px;height:68px;font-size:2rem}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:4px 0 8px;scrollbar-width:none}
+.chip{flex:none;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:99px;padding:7px 14px;min-height:36px;font-weight:500}
+.chip.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.svc{display:flex;gap:12px;align-items:stretch;cursor:pointer;text-decoration:none;color:inherit}
+.svc .thumb{width:92px;height:92px;border-radius:14px}
+.sugg{position:absolute;left:0;right:0;top:100%;background:var(--card);border-radius:10px;box-shadow:var(--shadow);z-index:20;overflow:hidden;margin-top:4px}
+.sugg a{display:flex;justify-content:space-between;padding:10px 14px;color:inherit;text-decoration:none;border-bottom:1px solid var(--line)}
+.sugg a:hover{background:var(--accent-soft)}
+nav.bottom{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);display:flex;justify-content:center;padding-bottom:env(safe-area-inset-bottom);z-index:30}
+nav.bottom a{flex:1;max-width:160px;text-align:center;padding:10px 4px;color:var(--mute);text-decoration:none;font-size:.78rem;position:relative}
+nav.bottom a b{display:block;font-size:1.3rem;line-height:1.2}
+nav.bottom a.on{color:var(--accent)}
+nav.bottom .cnt{position:absolute;top:4px;left:55%;background:var(--bad);color:#fff;border-radius:99px;font-size:.68rem;min-width:18px;padding:0 5px}
+.days{display:flex;gap:8px;overflow-x:auto;padding:4px 2px 10px;scrollbar-width:thin}
+.day{flex:none;width:58px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:12px;padding:8px 0;min-height:64px;flex-direction:column;gap:0;font-weight:500}
+.day small{font-size:.7rem;color:var(--mute)}.day b{font-size:1.15rem}
+.day.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}.day.on small{color:var(--accent-ink)}
+.day:disabled{opacity:.4;background:var(--bg)}
+.slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px}
+.slot{background:var(--card);color:var(--ink);border:1px solid var(--line);font-weight:500;padding:9px 4px}
+.slot.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.slot:disabled{background:var(--bg);color:var(--mute);text-decoration:line-through;opacity:.6}
+.opt{display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line);cursor:pointer}
+.opt:last-child{border:0}
+.seg2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.seg2 button{background:var(--card);color:var(--ink);border:1px solid var(--line)}.seg2 button.on{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+.stickybar{position:sticky;bottom:72px;background:var(--card);box-shadow:0 -4px 14px rgba(20,24,50,.12);border-radius:14px;padding:12px;z-index:10}
+.starpick button{background:transparent;color:#f59e0b;font-size:2rem;padding:0 4px;min-height:44px}
+.hero-img{border-radius:var(--radius);overflow:hidden}
+.gallery{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:0}
+.gallery img{flex:none;width:100%;aspect-ratio:16/9;object-fit:cover;scroll-snap-align:start}
+.tick{width:64px;height:64px;border-radius:50%;background:var(--ok-soft);color:var(--ok);font-size:2.2rem;display:flex;align-items:center;justify-content:center;margin:0 auto 8px}
+</style>
+</head>
+<body>
+<div id="app"><p class="center mute" style="margin-top:30vh">Loading…</p></div>
+<nav class="bottom" id="nav" hidden>
+  <a href="#/" data-n="home"><b>🏠</b>Services</a>
+  <a href="#/cart" data-n="cart"><b>🛍️</b>Cart Bag<span class="cnt" id="cnt" hidden></span></a>
+  <a href="#/me" data-n="me"><b>👤</b>My bookings</a>
+</nav>
+<script src="/common.js"></script>
+<script>
+'use strict';
+const slug = location.pathname.split('/').filter(Boolean).pop();
+const TK = 'apt_token_' + slug, CK = 'apt_cart_' + slug;
+const api = makeApi('/api/shop/' + slug, TK, () => { api.setToken(null); S.me = null; render(); });
+const app = $('#app');
+const S = { biz: null, me: null, vouchers: [], filters: { cat: '', q: '', areaType: '', areaId: '' }, cart: safe(() => JSON.parse(localStorage.getItem(CK) || '[]')) || [], D: null };
+const saveCart = () => { safe(() => localStorage.setItem(CK, JSON.stringify(S.cart))); updateNav(); };
+
+function updateNav() {
+  const c = $('#cnt'); c.hidden = !S.cart.length; c.textContent = S.cart.length;
+  const h = location.hash || '#/';
+  const cur = h.startsWith('#/cart') || h.startsWith('#/pay') ? 'cart' : h.startsWith('#/me') || h.startsWith('#/done') ? 'me' : 'home';
+  $$('#nav a').forEach((a) => a.classList.toggle('on', a.dataset.n === cur));
+}
+const hm = (m) => pd(Math.floor(m / 60)) + ':' + pd(m % 60);
+const scrollKeep = (fn) => { const y = window.scrollY; fn(); window.scrollTo(0, y); };
+
+// ------------------------------------------------------------------ boot
+async function boot() {
+  try { S.biz = await api.get(''); } catch (e) { app.innerHTML = `<div class="card center"><h2>Sorry</h2><p>${esc(e.message)}</p></div>`; return; }
+  document.title = S.biz.name + ' - Book an appointment';
+  if (api.hasToken()) { try { await loadMe(); } catch { api.setToken(null); } }
+  window.addEventListener('hashchange', render);
+  render();
+}
+async function loadMe() { const r = await api.get('/me'); S.me = r.customer; S.vouchers = r.vouchers; S.pointsPerRM = r.pointsPerRM; }
+
+function render() {
+  updateNav();
+  $('#nav').hidden = !S.me;
+  if (!S.me) return renderLogin();
+  const h = (location.hash || '#/').slice(2).split('/');
+  const view = { '': renderHome, s: renderService, cart: renderCart, pay: renderPay, done: renderDone, me: renderMe }[h[0]] || renderHome;
+  window.scrollTo(0, 0);
+  view(h[1]);
+}
+const head = () => `<div class="row" style="margin:4px 2px 12px"><div class="grow b">${esc(S.biz.name)}</div><span class="small mute">Hi, ${esc(S.me.name.split(' ')[0])}</span></div>`;
+
+// ------------------------------------------------------------------ login
+function renderLogin() {
+  const b = S.biz;
+  app.innerHTML = `<div class="card stack">
+    <div class="hero">${b.photo ? `<img class="thumb" src="${esc(b.photo)}" alt="">` : `<div class="thumb">✨</div>`}<div><h1>${esc(b.name)}</h1><div class="mute">${esc(b.industry)}</div></div></div>
+    <p class="mute" style="margin:0">${esc(b.about)}</p>
+    <h2>Log in to book</h2>
+    <form id="lf">
+      <label class="f" for="n">Name</label><input id="n" autocomplete="name" required>
+      <label class="f" for="p">Contact number</label><input id="p" type="tel" inputmode="tel" autocomplete="tel" placeholder="e.g. 012-345 6789" required>
+      <label class="f" for="e">Email</label><input id="e" type="email" autocomplete="email" required>
+      <p class="err" id="le" role="alert"></p>
+      <button style="width:100%;margin-top:8px">Continue</button>
+    </form>
+    <p class="small mute">New here? Just enter your details and we will create your account. Your number and email are only used for your bookings and appointment reminders.</p>
+  </div>`;
+  $('#lf').onsubmit = async (ev) => {
+    ev.preventDefault(); $('#le').textContent = '';
+    try {
+      const r = await api.post('/login', { name: $('#n').value, phone: $('#p').value, email: $('#e').value });
+      api.setToken(r.token); await loadMe(); location.hash = '#/'; render();
+    } catch (e) { $('#le').textContent = e.message; }
+  };
+}
+
+// ------------------------------------------------------------------ home (browse / filter / search)
+function renderHome() {
+  const b = S.biz, f = S.filters;
+  const areaOpts = b.areas.filter((a) => !f.areaType || a.type === f.areaType);
+  app.innerHTML = head() + `
+  <div class="card hero" style="margin-bottom:12px">${b.photo ? `<img class="thumb" src="${esc(b.photo)}" alt="">` : `<div class="thumb">✨</div>`}
+    <div class="grow"><h2 style="margin:0">${esc(b.name)}</h2><div class="small mute">${esc(b.industry)}${b.address ? ' · ' + esc(b.address) : ''}</div><div class="small">${esc(b.about)}</div></div></div>
+  <div style="position:relative"><input id="q" type="search" placeholder="🔍 Search service name" value="${esc(f.q)}" autocomplete="off" aria-label="Search service name"><div class="sugg" id="sg" hidden></div></div>
+  <div class="chips" role="tablist"><button class="chip ${f.cat ? '' : 'on'}" data-cat="">All</button>${b.categories.map((c) => `<button class="chip ${f.cat === c.id ? 'on' : ''}" data-cat="${c.id}">${esc(c.icon)} ${esc(c.name)}</button>`).join('')}</div>
+  <div class="row" style="margin-bottom:12px">
+    <select id="at" aria-label="Service type"><option value="">In shop or home</option><option value="shop" ${f.areaType === 'shop' ? 'selected' : ''}>In shop</option><option value="home" ${f.areaType === 'home' ? 'selected' : ''}>Home service</option></select>
+    <select id="ar" aria-label="Service area"><option value="">Any area</option>${areaOpts.map((a) => `<option value="${a.id}" ${f.areaId === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select>
+  </div>
+  <div id="list" class="stack"></div>`;
+  $$('.chip').forEach((c) => c.onclick = () => { f.cat = c.dataset.cat; $$('.chip').forEach((x) => x.classList.toggle('on', x === c)); loadList(); });
+  $('#at').onchange = (e) => { f.areaType = e.target.value; f.areaId = ''; renderHome(); };
+  $('#ar').onchange = (e) => { f.areaId = e.target.value; loadList(); };
+  let t1, t2;
+  $('#q').oninput = (e) => {
+    f.q = e.target.value; clearTimeout(t1); clearTimeout(t2);
+    t1 = setTimeout(loadList, 250);
+    t2 = setTimeout(async () => {
+      const sg = $('#sg'); if (!f.q.trim()) { sg.hidden = true; return; }
+      const r = await api.get('/suggest?q=' + encodeURIComponent(f.q)).catch(() => []);
+      sg.hidden = !r.length;
+      sg.innerHTML = r.map((s) => `<a href="#/s/${s.id}"><span>${esc(s.name)} <span class="small mute">· ${esc(s.category)}</span></span><span class="price">${rm(s.price)}</span></a>`).join('');
+    }, 150);
+  };
+  $('#q').onblur = () => setTimeout(() => { const s = $('#sg'); if (s) s.hidden = true; }, 200);
+  loadList();
+}
+async function loadList() {
+  const f = S.filters, el = $('#list'); if (!el) return;
+  const qs = new URLSearchParams({ q: f.q, cat: f.cat, areaType: f.areaType, areaId: f.areaId });
+  try {
+    const list = await api.get('/services?' + qs);
+    if (!$('#list')) return;
+    el.innerHTML = list.length ? list.map(svcCard).join('') : `<div class="card center mute">No services match your search. Try another category, area or keyword.</div>`;
+  } catch (e) { el.innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
+}
+function svcCard(s) {
+  const tags = [s.topPick ? '<span class="badge warn">🔥 Top pick</span>' : '', s.recommended ? '<span class="badge ok">👍 Recommended</span>' : '', s.promo ? '<span class="badge bad">Promo</span>' : ''].join(' ');
+  const types = s.areaTypes.map((t) => (t === 'home' ? '🏠 Home' : '🏪 In shop')).join(' · ');
+  return `<a class="card svc" href="#/s/${s.id}">${thumb(s)}<div class="grow"><div class="row between"><div class="b">${esc(s.name)}</div></div>
+    <div class="small mute">${esc(s.categoryName)} · ${s.durationMin} min · ${types}</div>
+    <div class="row" style="margin:4px 0;flex-wrap:wrap;gap:6px">${tags}</div>
+    <div class="row between wrap"><div>${s.promo ? `<span class="strike">${rm(s.price)}</span> ` : ''}<span class="price ${s.promo ? 'promo' : ''}">${rm(s.effPrice)}</span></div>
+    ${s.reviews ? `<span class="small"><span class="stars">★</span> ${s.rating} (${s.reviews})</span>` : ''}</div>
+    <div class="small ${s.nextAvailable ? 'mute' : 'err'}">${s.nextAvailable ? 'Next available: ' + fmtDate(s.nextAvailable) : 'Fully booked for now'}</div></div></a>`;
+}
+
+// ------------------------------------------------------------------ service detail + booking slot
+async function renderService(id) {
+  app.innerHTML = head() + '<p class="center mute">Loading…</p>';
+  let it;
+  try { it = await api.get('/services/' + id); } catch (e) { app.innerHTML = head() + `<div class="card"><p class="err">${esc(e.message)}</p><a href="#/">← Back</a></div>`; return; }
+  const types = [...new Set(it.areas.map((a) => a.type))];
+  S.D = { it, addons: new Set(), type: types.length === 1 ? types[0] : '', areaId: '', address: '', date: '', time: '', remark: '', days: [], slots: [], dur: it.durationMin, loading: false };
+  // pre-tick compulsory single-option groups so the customer sees what is required
+  for (const g of it.groups) if (g.required && g.options.length === 1) S.D.addons.add(g.options[0].id);
+  const areasOf = (t) => it.areas.filter((a) => a.type === t);
+  if (types.length === 1 && areasOf(types[0]).length === 1) S.D.areaId = areasOf(types[0])[0].id;
+  paintService();
+  refreshDays();
+}
+const pendingFor = () => S.cart.map((l) => ({ itemId: l.itemId, addons: l.addons, date: l.date, time: l.time }));
+async function refreshDays() {
+  const D = S.D; if (!D) return;
+  try {
+    const r = await api.post('/days', { itemId: D.it.id, addons: [...D.addons], pending: pendingFor() });
+    D.days = r.days; D.dur = r.durationMin;
+    if (D.date && (D.days.find((d) => d.date === D.date) || {}).state !== 'open') D.date = '';
+    if (!D.date) { const first = D.days.find((d) => d.state === 'open'); if (first) D.date = first.date; }
+    await refreshSlots(true);
+  } catch (e) { toast(e.message, 'bad'); }
+}
+async function refreshSlots(skipPaint) {
+  const D = S.D; if (!D || !D.date) { if (D) { D.slots = []; paintService(); } return; }
+  try {
+    const r = await api.post('/availability', { itemId: D.it.id, addons: [...D.addons], date: D.date, pending: pendingFor() });
+    D.slots = r.slots; D.dur = r.durationMin;
+    if (D.time && !(D.slots.find((s) => s.time === D.time) || {}).available) D.time = '';
+  } catch (e) { toast(e.message, 'bad'); }
+  scrollKeep(paintService);
+}
+function linePrice() {
+  const D = S.D, it = D.it;
+  let p = it.effPrice;
+  for (const g of it.groups) for (const o of g.options) if (D.addons.has(o.id)) p += o.price;
+  const a = it.areas.find((x) => x.id === D.areaId);
+  if (a && a.type === 'home') p += a.fee;
+  return Math.round(p * 100) / 100;
+}
+function paintService() {
+  const D = S.D; if (!D) return;
+  const it = D.it;
+  const types = [...new Set(it.areas.map((a) => a.type))];
+  const areas = it.areas.filter((a) => a.type === D.type);
+  const area = it.areas.find((a) => a.id === D.areaId);
+  const gallery = it.images.length ? `<div class="gallery">${it.images.map((u) => `<img src="${esc(u)}" alt="${esc(it.name)}">`).join('')}</div>` : thumb(it, true);
+  const openDays = D.days.filter((d) => d.state === 'open').length;
+  const dayBox = $('#days'), dayLeft = dayBox ? dayBox.scrollLeft : 0;
+  app.innerHTML = head() + `<a href="#/" class="small">← All services</a>
+  <div class="card flush" style="margin:8px 0 12px"><div class="hero-img">${gallery}</div>
+    <div style="padding:16px"><div class="row between wrap"><h1 style="margin:0">${esc(it.name)}</h1><div>${it.promo ? `<span class="strike">${rm(it.price)}</span> ` : ''}<span class="price promo" style="${it.promo ? '' : 'color:var(--ink)'}">${rm(it.effPrice)}</span></div></div>
+    <div class="small mute">${esc(it.categoryName)} · approx. ${D.dur} min ${it.reviews ? `· <span class="stars">★</span> ${it.rating} (${it.reviews} reviews)` : ''}</div>
+    <div class="row wrap" style="gap:6px;margin:8px 0">${it.topPick ? '<span class="badge warn">🔥 Top pick</span>' : ''}${it.recommended ? '<span class="badge ok">👍 Recommended</span>' : ''}${it.promo ? `<span class="badge bad">Promo${it.promoTo ? ' until ' + fmtDate(it.promoTo) : ''}</span>` : ''}</div>
+    <p style="white-space:pre-line;margin:6px 0 0">${esc(it.description)}</p></div></div>
+
+  ${it.groups.map((g) => `<div class="card" style="margin-bottom:12px"><div class="row between"><h3 style="margin:0">${esc(g.name)}</h3><span class="badge ${g.required ? 'bad' : 'gray'}">${g.required ? 'Compulsory' : 'Optional'}${g.max ? ' · max ' + g.max : ''}</span></div>
+    ${g.options.map((o) => `<label class="opt"><input type="${g.max === 1 ? 'radio' : 'checkbox'}" name="g${g.id}" data-g="${g.id}" data-o="${o.id}" ${D.addons.has(o.id) ? 'checked' : ''}>
+      <span class="grow"><span class="b">${esc(o.name)}</span> <span class="small mute">+${o.durationMin} min</span></span>
+      <span>${o.normalPrice > o.price ? `<span class="strike small">${rm(o.normalPrice)}</span> ` : ''}<span class="price">+${rm(o.price)}</span></span></label>`).join('')}</div>`).join('')}
+
+  <div class="card stack" style="margin-bottom:12px"><h3 style="margin:0">Where would you like the service?</h3>
+    ${types.length > 1 ? `<div class="seg2" id="types"><button data-t="shop" class="${D.type === 'shop' ? 'on' : ''}">🏪 In shop</button><button data-t="home" class="${D.type === 'home' ? 'on' : ''}">🏠 Home service</button></div>` : `<div class="b">${D.type === 'home' ? '🏠 Home service' : '🏪 In shop'}</div>`}
+    ${D.type ? `<select id="area" aria-label="Service area"><option value="">Choose ${D.type === 'home' ? 'your area' : 'branch'}…</option>${areas.map((a) => `<option value="${a.id}" ${D.areaId === a.id ? 'selected' : ''}>${esc(a.name)}${a.fee ? ' (+' + rm(a.fee) + ' travel)' : ''}</option>`).join('')}</select>` : ''}
+    ${area && area.type === 'shop' && area.address ? `<div class="small mute">📍 ${esc(area.address)}</div>` : ''}
+    ${area && area.type === 'home' ? `<label class="f" for="addr" style="margin:0">Your address for the visit</label><textarea id="addr" placeholder="Unit / street / postcode / city">${esc(D.address)}</textarea>` : ''}
+  </div>
+
+  <div class="card" style="margin-bottom:12px"><h3>Choose date & time</h3>
+    ${D.days.length ? (openDays ? '' : '<p class="err">No available slots in the next ' + it.maxDaysAhead + ' days.</p>') : '<p class="mute">Checking availability…</p>'}
+    <div class="days" id="days">${D.days.map((d) => { const dt = dOf(d.date); return `<button class="day ${D.date === d.date ? 'on' : ''}" data-d="${d.date}" ${d.state !== 'open' ? 'disabled' : ''} title="${d.state === 'full' ? 'Fully booked' : d.state === 'closed' ? 'Closed' : d.free + ' slots'}"><small>${dt.toLocaleDateString('en-GB', { weekday: 'short' })}</small><b>${dt.getDate()}</b><small>${dt.toLocaleDateString('en-GB', { month: 'short' })}</small></button>`; }).join('')}</div>
+    ${D.date ? `<div class="small mute" style="margin-bottom:8px">${fmtDate(D.date)} · tap a time</div><div class="slots" id="slots">${D.slots.map((s) => `<button class="slot ${D.time === s.time ? 'on' : ''}" data-t="${s.time}" ${s.available ? '' : 'disabled'}>${fmtTime(s.time)}</button>`).join('')}</div>` : ''}
+  </div>
+
+  <div class="card" style="margin-bottom:12px"><label class="f" for="rk" style="margin-top:0">Remark for the service provider (optional)</label><textarea id="rk" placeholder="Allergies, preferences, pet temperament, parking info…">${esc(D.remark)}</textarea></div>
+
+  ${it.recentReviews.length ? `<div class="card" style="margin-bottom:12px"><h3>Customer reviews</h3>${it.recentReviews.map((r) => `<div style="margin-bottom:8px"><span class="stars">${stars(r.rating)}</span> <span class="small mute">${esc(r.name)}</span><div>${esc(r.comment)}</div></div>`).join('')}</div>` : ''}
+
+  <div class="stickybar row"><div class="grow"><div class="small mute">Total (before charges)</div><div class="price" style="font-size:1.2rem">${rm(linePrice())}</div></div><button id="add">Add to cart</button></div>`;
+
+  if ($('#days')) $('#days').scrollLeft = dayLeft;
+  $$('input[data-o]').forEach((inp) => inp.onchange = () => {
+    const g = it.groups.find((x) => x.id === inp.dataset.g);
+    if (g.max === 1) g.options.forEach((o) => D.addons.delete(o.id));
+    if (inp.checked) D.addons.add(inp.dataset.o); else D.addons.delete(inp.dataset.o);
+    if (g.max > 1 && g.options.filter((o) => D.addons.has(o.id)).length > g.max) { D.addons.delete(inp.dataset.o); toast(`You can choose up to ${g.max} for "${g.name}"`, 'bad'); }
+    D.time = ''; paintService(); refreshDays();
+  });
+  $$('#types button').forEach((b) => b.onclick = () => { D.type = b.dataset.t; D.areaId = ''; const a = it.areas.filter((x) => x.type === D.type); if (a.length === 1) D.areaId = a[0].id; scrollKeep(paintService); });
+  const ar = $('#area'); if (ar) ar.onchange = () => { D.areaId = ar.value; scrollKeep(paintService); };
+  const ad = $('#addr'); if (ad) ad.oninput = () => { D.address = ad.value; };
+  $('#rk').oninput = (e) => { D.remark = e.target.value; };
+  $$('.day').forEach((b) => b.onclick = () => { D.date = b.dataset.d; D.time = ''; refreshSlots(); });
+  $$('.slot').forEach((b) => b.onclick = () => { D.time = b.dataset.t; scrollKeep(paintService); });
+  $('#add').onclick = addToCart;
+}
+async function addToCart() {
+  const D = S.D, it = D.it;
+  for (const g of it.groups) if (g.required && !g.options.some((o) => D.addons.has(o.id))) return toast(`Please choose an option for "${g.name}"`, 'bad');
+  if (!D.type) return toast('Please choose In shop or Home service', 'bad');
+  if (!D.areaId) return toast('Please choose a service area', 'bad');
+  if (D.type === 'home' && D.address.trim().length < 8) return toast('Please enter your full home address', 'bad');
+  if (!D.date || !D.time) return toast('Please choose a date and time slot', 'bad');
+  const area = it.areas.find((a) => a.id === D.areaId);
+  const line = {
+    itemId: it.id, name: it.name, image: it.images[0] || '', icon: it.icon, addons: [...D.addons], areaId: D.areaId, areaName: area.name, areaType: area.type,
+    address: D.type === 'home' ? D.address.trim() : '', date: D.date, time: D.time, remark: D.remark.trim(), price: linePrice(), durationMin: D.dur,
+  };
+  const btn = $('#add'); btn.disabled = true;
+  try {
+    const q = await api.post('/quote', { lines: [...S.cart, line] });
+    const bad = q.lines.find((l) => l.problem);
+    if (bad) throw new Error(`${bad.name} (${fmtDate(bad.date)} ${fmtTime(bad.time)}): ${bad.problem}`);
+    S.cart.push(line); saveCart(); S.D = null;
+    location.hash = '#/'; toast('Added to your cart bag ✔  You can keep adding more services.');
+  } catch (e) { toast(e.message, 'bad'); btn.disabled = false; refreshDays(); }
+}
+
+// ------------------------------------------------------------------ cart bag
+async function renderCart() {
+  if (!S.cart.length) { app.innerHTML = head() + `<div class="card center"><div style="font-size:3rem">🛍️</div><h2>Your cart bag is empty</h2><p class="mute">Pick a service and add it to your cart.</p><a class="btn" href="#/">Browse services</a></div>`; return; }
+  app.innerHTML = head() + '<p class="center mute">Calculating…</p>';
+  let q;
+  try { q = await api.post('/quote', { lines: S.cart }); } catch (e) {
+    app.innerHTML = head() + `<div class="card stack"><h2>Cart bag</h2><p class="err">${esc(e.message)}</p><button id="clr" class="danger">Clear cart</button></div>`;
+    $('#clr').onclick = () => { S.cart = []; saveCart(); renderCart(); }; return;
+  }
+  const blocked = !q.ok;
+  app.innerHTML = head() + `<h2>Cart bag (${q.lines.length})</h2><div class="stack">
+  ${q.lines.map((l, i) => `<div class="card"><div class="row" style="align-items:flex-start">${thumb(l)}<div class="grow"><div class="b">${esc(l.name)}</div>
+    ${l.addons.length ? `<div class="small mute">+ ${l.addons.map((a) => esc(a.name)).join(', ')}</div>` : ''}
+    <div class="small">📅 ${fmtDate(l.date)} · ${fmtTime(l.time)} – ${fmtTime(hm(l.endMin))}</div>
+    <div class="small mute">${l.areaType === 'home' ? '🏠 ' + esc(l.address) : '🏪 ' + esc(l.areaName)}${l.areaFee ? ' (travel ' + rm(l.areaFee) + ')' : ''}</div>
+    ${l.remark ? `<div class="small mute">📝 ${esc(l.remark)}</div>` : ''}${l.problem ? `<div class="err small">⚠ ${esc(l.problem)}</div>` : ''}</div>
+    <div class="right"><div class="price">${rm(l.price)}</div><button class="sm danger" data-rm="${i}" style="margin-top:6px">Remove</button></div></div></div>`).join('')}
+  <div class="card stack">
+    <div class="row between"><span>Subtotal</span><span>${rm(q.subtotal)}</span></div>
+    ${q.voucher ? `<div class="row between" style="color:var(--ok)"><span>🎟 Voucher ${esc(q.voucher.code)} (auto applied)</span><span>− ${rm(q.discount)}</span></div>` : ''}
+    ${q.charges.map((c) => `<div class="row between"><span>${esc(c.name)}${c.type === 'percent' ? ` (${c.value}%)` : ''}</span><span>${rm(c.amount)}</span></div>`).join('')}
+    <div class="row between b" style="font-size:1.2rem;border-top:1px solid var(--line);padding-top:10px"><span>Total</span><span>${rm(q.total)}</span></div>
+    <div class="small" style="color:var(--ok)">⭐ You will earn ${q.points} loyalty points after payment</div>
+  </div>
+  <div class="row"><a class="btn line" href="#/" style="flex:1">+ Add another service</a><button id="go" style="flex:1" ${blocked ? 'disabled' : ''}>Confirm order</button></div>
+  <p class="small mute center">Slots are reserved for ${S.biz.holdMinutes} minutes while you pay.</p></div>`;
+  $$('[data-rm]').forEach((b) => b.onclick = () => { S.cart.splice(Number(b.dataset.rm), 1); saveCart(); renderCart(); });
+  $('#go').onclick = async () => {
+    $('#go').disabled = true;
+    try { const o = await api.post('/orders', { lines: S.cart }); S.cart = []; saveCart(); location.hash = '#/pay/' + o.id; }
+    catch (e) { toast(e.message, 'bad'); renderCart(); }
+  };
+}
+
+// ------------------------------------------------------------------ checkout / payment
+let payTimer;
+async function renderPay(id) {
+  clearInterval(payTimer);
+  let o;
+  try { o = await api.get('/orders/' + id); } catch (e) { app.innerHTML = head() + `<div class="card err">${esc(e.message)}</div>`; return; }
+  if (o.status === 'paid') { location.hash = '#/done/' + id; return; }
+  if (o.status !== 'pending_payment') { app.innerHTML = head() + `<div class="card center"><h2>Reservation expired</h2><p class="mute">Your slots were released because payment was not completed in time.</p><a class="btn" href="#/">Start again</a></div>`; return; }
+  app.innerHTML = head() + `<h2>Checkout · ${esc(o.no)}</h2><div class="stack">
+  <div class="card center" id="timer" style="background:var(--warn-soft);color:var(--warn)"></div>
+  <div class="card stack">${o.appts.map((a) => `<div class="row between"><div><div class="b">${esc(a.name)}</div><div class="small mute">${fmtDate(a.date)} · ${fmtTime(a.time)}</div></div><div>${rm(a.price)}</div></div>`).join('')}
+    <div class="row between small"><span>Subtotal</span><span>${rm(o.subtotal)}</span></div>
+    ${o.discount ? `<div class="row between small" style="color:var(--ok)"><span>Voucher ${esc(o.voucherCode)}</span><span>− ${rm(o.discount)}</span></div>` : ''}
+    ${o.charges.map((c) => `<div class="row between small"><span>${esc(c.name)}</span><span>${rm(c.amount)}</span></div>`).join('')}
+    <div class="row between b" style="font-size:1.2rem"><span>Total to pay</span><span>${rm(o.total)}</span></div></div>
+  <div class="card"><h3>Payment method</h3>
+    ${Object.entries(PAY).map(([k, v], i) => `<label class="opt"><input type="radio" name="pm" value="${k}" ${i ? '' : 'checked'}><span class="grow">${v}</span></label>`).join('')}
+    <p class="small mute">Demo payment gateway: no real money is charged. The business connects its live gateway (e.g. Billplz / Stripe) before go-live.</p></div>
+  <button id="pay" style="width:100%;min-height:50px">Pay ${rm(o.total)}</button><p class="err center" id="pe" role="alert"></p></div>`;
+  const tick = () => {
+    const s = Math.max(0, Math.round((o.holdUntil - Date.now()) / 1000));
+    const el = $('#timer'); if (!el) return clearInterval(payTimer);
+    el.textContent = s ? `⏱ Your slots are reserved for ${Math.floor(s / 60)}:${pd(s % 60)}` : 'Reservation expired';
+    if (!s) { clearInterval(payTimer); renderPay(id); }
+  };
+  tick(); payTimer = setInterval(tick, 1000);
+  $('#pay').onclick = async () => {
+    $('#pay').disabled = true; $('#pay').textContent = 'Processing…';
+    try { await api.post(`/orders/${id}/pay`, { method: $('input[name=pm]:checked').value }); clearInterval(payTimer); await loadMe(); location.hash = '#/done/' + id; }
+    catch (e) { $('#pe').textContent = e.message; $('#pay').disabled = false; $('#pay').textContent = 'Try again'; }
+  };
+}
+async function renderDone(id) {
+  clearInterval(payTimer);
+  let o; try { o = await api.get('/orders/' + id); } catch (e) { app.innerHTML = head() + `<div class="card err">${esc(e.message)}</div>`; return; }
+  if (o.status !== 'paid') { location.hash = '#/pay/' + id; return; }
+  await loadMe();
+  app.innerHTML = head() + `<div class="card center stack"><div class="tick">✓</div><h1>Booking confirmed</h1><div class="mute">Order ${esc(o.no)} · paid ${rm(o.total)} by ${esc(PAY[o.payment.method])}</div>
+    <div class="card" style="background:var(--ok-soft);color:var(--ok)"><div style="font-size:2rem;font-weight:800">+${o.points} points</div><div>earned for the loyalty programme · balance <b>${S.me.points}</b> points</div></div>
+    ${o.appts.map((a) => `<div class="card right" style="text-align:left;background:var(--bg)"><div class="b">${esc(a.name)}</div><div class="small">📅 ${fmtDate(a.date)} · ${fmtTime(a.time)}</div><div class="small mute">${a.areaType === 'home' ? '🏠 ' + esc(a.address) : '🏪 ' + esc(a.areaName)}</div></div>`).join('')}
+    <p class="small mute">We will remind you on WhatsApp and email one day before your appointment.</p>
+    <div class="row"><a class="btn line" href="#/" style="flex:1">Book more</a><a class="btn" href="#/me" style="flex:1">My bookings</a></div></div>`;
+}
+
+// ------------------------------------------------------------------ my bookings / account
+async function renderMe() {
+  app.innerHTML = head() + '<p class="center mute">Loading…</p>';
+  let appts, orders;
+  try { [appts, orders] = await Promise.all([api.get('/appointments'), api.get('/orders'), loadMe()]); } catch (e) { app.innerHTML = head() + `<div class="card err">${esc(e.message)}</div>`; return; }
+  const t0 = ymdOf(new Date());
+  const upcoming = appts.filter((a) => ['scheduled', 'in_progress'].includes(a.status) && a.date >= t0).reverse();
+  const past = appts.filter((a) => !upcoming.includes(a));
+  const unpaid = orders.filter((o) => o.status === 'pending_payment');
+  const tab = S.meTab || 'up';
+  const card = (a) => `<div class="card"><div class="row between"><div class="b">${esc(a.name)}</div>${statusBadge(a.status)}</div>
+    ${a.addons.length ? `<div class="small mute">+ ${a.addons.map((x) => esc(x.name)).join(', ')}</div>` : ''}
+    <div class="small">📅 ${fmtDate(a.date)} · ${fmtTime(a.time)} – ${fmtTime(a.endTime)}</div>
+    <div class="small mute">${a.areaType === 'home' ? '🏠 ' + esc(a.address) : '🏪 ' + esc(a.areaName)} · ${rm(a.price)} · ${esc(a.orderNo)}</div>
+    ${a.remark ? `<div class="small mute">📝 ${esc(a.remark)}</div>` : ''}
+    ${a.review ? `<div class="small" style="margin-top:6px"><span class="stars">${stars(a.review.rating)}</span> ${esc(a.review.comment)}</div>` : ''}
+    ${a.canReview ? `<button class="sm" data-rv="${a.id}" style="margin-top:8px">⭐ Rate & review</button>` : ''}</div>`;
+  app.innerHTML = head() + `<div class="card stack"><div class="row between"><div><div class="b">${esc(S.me.name)}</div><div class="small mute">${esc(S.me.phone)} · ${esc(S.me.email)}</div></div>
+    <div class="center"><div style="font-size:1.8rem;font-weight:800;color:var(--ok)">${S.me.points}</div><div class="small mute">loyalty points</div></div></div>
+    ${S.vouchers.length ? `<div>${S.vouchers.map((v) => `<div class="badge ok" style="margin:2px 4px 2px 0">🎟 ${esc(v.code)} · ${v.type === 'percent' ? v.value + '% off' : rm(v.value) + ' off'}${v.expiry ? ' · until ' + fmtDate(v.expiry) : ''}</div>`).join('')}<div class="small mute">Vouchers are applied automatically on your next order.</div></div>` : ''}
+    <button class="line sm" id="lo">Log out</button></div>
+  ${unpaid.length ? `<div class="card" style="margin-top:12px;background:var(--warn-soft)"><div class="b">Awaiting payment</div>${unpaid.map((o) => `<div class="row between"><span>${esc(o.no)} · ${rm(o.total)}</span><a class="btn sm" href="#/pay/${o.id}">Pay now</a></div>`).join('')}</div>` : ''}
+  <div class="seg" style="margin:12px 0"><button data-tab="up" class="${tab === 'up' ? 'on' : ''}">Upcoming (${upcoming.length})</button><button data-tab="past" class="${tab === 'past' ? 'on' : ''}">Past (${past.length})</button></div>
+  <div class="stack">${(tab === 'up' ? upcoming : past).map(card).join('') || '<div class="card center mute">Nothing here yet.</div>'}</div>`;
+  $$('[data-tab]').forEach((b) => b.onclick = () => { S.meTab = b.dataset.tab; renderMe(); });
+  $('#lo').onclick = () => { api.setToken(null); S.me = null; location.hash = '#/'; render(); };
+  $$('[data-rv]').forEach((b) => b.onclick = () => reviewModal(appts.find((a) => a.id === b.dataset.rv)));
+}
+function reviewModal(a) {
+  let rating = 0;
+  const m = openModal(`<h2>How was ${esc(a.name)}?</h2><div class="starpick center" id="sp">${[1, 2, 3, 4, 5].map((n) => `<button data-n="${n}" aria-label="${n} stars">☆</button>`).join('')}</div>
+    <label class="f" for="rc">Comment</label><textarea id="rc" maxlength="500" placeholder="Tell us about your experience"></textarea><p class="err" id="re"></p>
+    <div class="row" style="margin-top:10px"><button class="line grow" data-close>Cancel</button><button class="grow" id="rs">Submit</button></div>`);
+  const paint = () => $$('#sp button', m.el).forEach((b) => { b.textContent = Number(b.dataset.n) <= rating ? '★' : '☆'; });
+  $$('#sp button', m.el).forEach((b) => b.onclick = () => { rating = Number(b.dataset.n); paint(); });
+  $('#rs', m.el).onclick = async () => {
+    try { await api.post('/reviews', { apptId: a.id, rating, comment: $('#rc', m.el).value }); m.close(); toast('Thank you for your review!'); renderMe(); }
+    catch (e) { $('#re', m.el).textContent = e.message; }
+  };
+}
+boot();
+</script>
+</body>
+</html>

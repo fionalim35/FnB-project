@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Service appointment platform</title>
+<link rel="stylesheet" href="/common.css">
+<style>main{max-width:720px;margin:0 auto;padding:24px 16px}a.card{display:block;text-decoration:none;color:inherit;margin-bottom:12px}a.card:hover{outline:2px solid var(--accent)}</style>
+</head>
+<body><main>
+<h1>Service appointment platform</h1>
+<p class="mute">Choose your role. Each role has its own link.</p>
+<a class="card" href="/super"><h2>🛡 Super admin <span class="badge gray">iPad</span></h2><div class="mute">Onboard businesses, overall dashboard and platform sales.</div><div class="small" style="margin-top:6px"><code>/super</code></div></a>
+<a class="card" href="/admin"><h2>🧑‍💼 Administrator <span class="badge gray">Desktop</span></h2><div class="mute">Set up services, staff, slots, view bookings, sales and vouchers.</div><div class="small" style="margin-top:6px"><code>/admin</code></div></a>
+<h3 style="margin-top:24px">Customer booking links <span class="badge gray">Phone</span></h3>
+<div id="biz"></div>
+</main>
+<script>
+fetch('/api/public/businesses').then((r) => r.json()).then((l) => {
+  document.getElementById('biz').innerHTML = l.map((b) => `<a class="card" href="/shop/${encodeURIComponent(b.slug)}"><b></b><div class="small mute"></div><code class="small">/shop/${encodeURIComponent(b.slug)}</code></a>`).join('');
+  [...document.querySelectorAll('#biz a')].forEach((a, i) => { a.querySelector('b').textContent = l[i].name; a.querySelector('.mute').textContent = l[i].industry; });
+}).catch(() => {});
+</script>
+</body></html>

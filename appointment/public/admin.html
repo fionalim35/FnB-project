@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Administrator portal</title>
+<link rel="stylesheet" href="/common.css">
+<style>
+#root{display:flex;min-height:100vh}
+aside{width:230px;flex:none;background:var(--card);border-right:1px solid var(--line);padding:14px 10px;position:sticky;top:0;height:100vh;overflow:auto}
+aside .brand{padding:6px 10px 14px;font-weight:700}
+aside button{display:flex;width:100%;justify-content:flex-start;text-align:left;background:transparent;color:var(--ink);font-weight:500;margin-bottom:2px}
+aside button.on{background:var(--accent-soft);color:var(--accent)}
+main{flex:1;min-width:0;padding:22px 26px 60px;max-width:1280px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px}
+.tools{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+.tools input,.tools select{width:auto}
+.imgs{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0}
+.imgs .im{position:relative}.imgs img{width:72px;height:72px;object-fit:cover;border-radius:10px}
+.imgs .im button{position:absolute;top:-6px;right:-6px;min-height:22px;width:22px;padding:0;border-radius:50%;background:var(--bad);color:#fff}
+.multi{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:2px 10px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;max-height:190px;overflow:auto}
+.grp{border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:12px;background:var(--card)}
+.login{margin:12vh auto;max-width:380px;width:100%}
+.scroll{overflow-x:auto}
+@media(max-width:860px){#root{display:block}aside{position:static;width:auto;height:auto;display:flex;overflow-x:auto;padding:8px}aside .brand{display:none}aside button{width:auto;flex:none}main{padding:14px}}
+</style>
+</head>
+<body>
+<div id="root" style="width:100%"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="/common.js"></script>
+<script>
+'use strict';
+const TK = 'apt_admin_token';
+const api = makeApi('/api/admin', TK, () => { api.setToken(null); showLogin(); });
+const root = $('#root');
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const TABS = [
+  ['dash', '📊 Dashboard'], ['appts', '📅 Appointments'], ['cats', '🗂 Categories'], ['items', '🛎 Services'], ['catalog', '🏷 Catalog & tagging'],
+  ['staff', '👩‍🔧 Service persons'], ['sched', '🕘 Days & time slots'], ['areas', '📍 Service areas'], ['cust', '👥 Customers & vouchers'],
+  ['reviews', '⭐ Reviews'], ['outbox', '🔔 Reminders log'], ['set', '⚙ Profile & settings'],
+];
+const C = { tab: 'dash', period: 'daily', filters: null, profile: null };
+const getAll = async () => {
+  [C.cats, C.items, C.staff, C.areas] = await Promise.all([api.get('/categories'), api.get('/items'), api.get('/staff'), api.get('/areas')]);
+};
+
+// ------------------------------------------------------------------ shell
+function showLogin() {
+  root.innerHTML = `<div class="login card stack"><h1>Administrator login</h1><form id="lf" class="stack">
+    <div><label class="f" for="u">Username</label><input id="u" autocomplete="username" required></div>
+    <div><label class="f" for="p">Password</label><input id="p" type="password" autocomplete="current-password" required></div>
+    <p class="err" id="le" role="alert"></p><button style="width:100%">Log in</button></form>
+    <p class="small mute">Your account is created by the platform owner (Super Admin).</p></div>`;
+  $('#lf').onsubmit = async (e) => {
+    e.preventDefault();
+    try { const r = await api.post('/login', { username: $('#u').value, password: $('#p').value }); api.setToken(r.token); boot(); } catch (er) { $('#le').textContent = er.message; }
+  };
+}
+async function boot() {
+  if (!api.hasToken()) return showLogin();
+  try { C.profile = await api.get('/profile'); await getAll(); } catch (e) { return showLogin(); }
+  root.innerHTML = `<aside><div class="brand">${esc(C.profile.name)}<div class="small mute">Administrator</div></div>${TABS.map(([k, l]) => `<button data-tab="${k}">${l}</button>`).join('')}
+    <button id="lo" style="margin-top:14px;color:var(--mute)">Log out</button></aside><main id="main"></main>`;
+  $$('aside [data-tab]').forEach((b) => b.onclick = () => go(b.dataset.tab));
+  $('#lo').onclick = () => { api.setToken(null); showLogin(); };
+  go(C.tab);
+}
+let pollTimer;
+function go(tab) {
+  C.tab = tab; clearInterval(pollTimer);
+  $$('aside [data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+  ({ dash: vDash, appts: vAppts, cats: vCats, items: vItems, catalog: vCatalog, staff: vStaff, sched: vSched, areas: vAreas, cust: vCust, reviews: vReviews, outbox: vOutbox, set: vSet })[tab]()
+    .catch((e) => { $('#main').innerHTML = `<div class="card err">${esc(e.message)}</div>`; });
+}
+const main = () => $('#main');
+const act = async (fn, okMsg) => { try { await fn(); if (okMsg) toast(okMsg); } catch (e) { toast(e.message, 'bad'); } };
+const confirmBox = (msg) => confirm(msg);
+
+// ------------------------------------------------------------------ generic form modal
+function fieldHtml(f, v) {
+  const id = 'f_' + f.k, val = v[f.k] == null ? '' : v[f.k];
+  const lab = `<label class="f" for="${id}">${esc(f.label)}</label>`;
+  if (f.type === 'check') return `<label class="chk"><input type="checkbox" id="${id}" ${v[f.k] ? 'checked' : ''}> ${esc(f.label)}</label>`;
+  if (f.type === 'textarea') return lab + `<textarea id="${id}">${esc(val)}</textarea>`;
+  if (f.type === 'select') return lab + `<select id="${id}">${f.options.map((o) => `<option value="${esc(o.v)}" ${String(o.v) === String(val) ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}</select>`;
+  if (f.type === 'multi') return lab + `<div class="multi" data-multi="${f.k}">${f.options.map((o) => `<label class="chk"><input type="checkbox" value="${esc(o.v)}" ${(v[f.k] || []).includes(o.v) ? 'checked' : ''}> ${esc(o.l)}</label>`).join('') || '<span class="mute small">Nothing to choose yet</span>'}</div>`;
+  if (f.type === 'images') return lab + `<div class="imgs" id="${id}"></div><input type="file" accept="image/*" ${f.single ? '' : 'multiple'} data-up="${f.k}">`;
+  return lab + `<input id="${id}" type="${f.type || 'text'}" ${f.step ? `step="${f.step}"` : ''} ${f.ph ? `placeholder="${esc(f.ph)}"` : ''} value="${esc(val)}">`;
+}
+function formModal(o) {
+  const v = { ...o.values };
+  const m = openModal(`<h2>${esc(o.title)}</h2>${o.note ? `<p class="small mute">${o.note}</p>` : ''}<form id="fm">${o.fields.map((f) => fieldHtml(f, v)).join('')}</form><p class="err" id="fe" role="alert"></p>
+    <div class="row" style="margin-top:12px"><button class="line grow" data-close>Cancel</button><button class="grow" id="fs">Save</button></div>`, o.wide);
+  const paintImgs = (k) => {
+    const box = $('#f_' + k, m.el), single = o.fields.find((f) => f.k === k).single;
+    const arr = single ? (v[k] ? [v[k]] : []) : v[k] || [];
+    box.innerHTML = arr.map((u, i) => `<div class="im"><img src="${esc(u)}" alt=""><button type="button" data-rmimg="${k}:${i}" aria-label="Remove image">×</button></div>`).join('') || '<span class="small mute">No image yet</span>';
+  };
+  o.fields.filter((f) => f.type === 'images').forEach((f) => paintImgs(f.k));
+  m.el.addEventListener('click', (e) => {
+    const r = e.target.closest('[data-rmimg]'); if (!r) return;
+    const [k, i] = r.dataset.rmimg.split(':'); const single = o.fields.find((f) => f.k === k).single;
+    if (single) v[k] = ''; else v[k].splice(Number(i), 1); paintImgs(k);
+  });
+  m.el.addEventListener('change', async (e) => {
+    const inp = e.target.closest('[data-up]'); if (!inp) return;
+    const k = inp.dataset.up, single = o.fields.find((f) => f.k === k).single;
+    for (const file of inp.files) {
+      try { const u = await uploadImage(file, TK); if (single) v[k] = u; else (v[k] = v[k] || []).push(u); paintImgs(k); } catch (er) { $('#fe', m.el).textContent = er.message; }
+    }
+    inp.value = '';
+  });
+  $('#fs', m.el).onclick = async (e) => {
+    e.preventDefault();
+    const out = { ...v };
+    for (const f of o.fields) {
+      const el = $('#f_' + f.k, m.el);
+      if (f.type === 'check') out[f.k] = el.checked;
+      else if (f.type === 'multi') out[f.k] = $$('[data-multi="' + f.k + '"] input:checked', m.el).map((x) => x.value);
+      else if (f.type !== 'images') out[f.k] = el.value;
+    }
+    e.target.disabled = true;
+    try { await o.onSave(out, m); m.close(); } catch (er) { $('#fe', m.el).textContent = er.message; e.target.disabled = false; }
+  };
+  return m;
+}
+const catOptions = (blank) => [{ v: '', l: blank }, ...C.cats.map((c) => ({ v: c.id, l: c.name + (c.active ? '' : ' (inactive)') }))];
+
+// ------------------------------------------------------------------ dashboard
+async function vDash() {
+  const s = await api.get('/stats?period=' + C.period);
+  const p = s.summary;
+  main().innerHTML = `<div class="row between wrap" style="margin-bottom:14px"><h1 style="margin:0">Dashboard</h1>
+    <div class="seg">${['daily', 'weekly', 'monthly', 'yearly'].map((x) => `<button data-p="${x}" class="${C.period === x ? 'on' : ''}">${x[0].toUpperCase() + x.slice(1)}</button>`).join('')}</div></div>
+  <div class="kpis" style="margin-bottom:14px">
+    <div class="card kpi"><div class="small mute">Sales (${C.period})</div><div class="v">${rm(p.revenue)}</div></div>
+    <div class="card kpi"><div class="small mute">Paid orders</div><div class="v">${p.orders}</div></div>
+    <div class="card kpi"><div class="small mute">Appointments booked</div><div class="v">${p.appointments}</div></div>
+    <div class="card kpi"><div class="small mute">Average order</div><div class="v">${rm(p.avgOrder)}</div></div>
+    <div class="card kpi"><div class="small mute">Upcoming appointments</div><div class="v">${s.live.upcoming}</div><div class="small mute">${s.live.today} today</div></div>
+    <div class="card kpi"><div class="small mute">Services listed</div><div class="v">${s.catalog.listedItems}</div><div class="small mute">${s.catalog.activeItems} active · ${s.catalog.topPicks} tagged picks</div></div>
+  </div>
+  <div class="card" style="margin-bottom:14px"><h3>Sales trend</h3>${barChart(s.series, 'revenue', rm)}</div>
+  <div class="grid2">
+    <div class="card"><h3>🔥 Hot sales / top picked services</h3>${s.topItems.length ? (() => { const mx = s.topItems[0].count; return s.topItems.map((t, i) => `<div style="margin:8px 0"><div class="row between"><span>${i + 1}. ${esc(t.name)}</span><span class="small mute">${t.count} booked · ${rm(t.revenue)}</span></div><div class="hbar"><i style="width:${(t.count / mx) * 100}%"></i></div></div>`).join(''); })() : '<p class="mute">No sales in this period yet.</p>'}</div>
+    <div class="card"><h3>Sales by category</h3>${s.categories.length ? (() => { const mx = s.categories[0].revenue || 1; return s.categories.map((c) => `<div style="margin:8px 0"><div class="row between"><span>${esc(c.name)}</span><span class="small mute">${c.count} · ${rm(c.revenue)}</span></div><div class="hbar"><i style="width:${(c.revenue / mx) * 100}%"></i></div></div>`).join(''); })() : '<p class="mute">No data yet.</p>'}
+      <h3 style="margin-top:18px">Items listed per category</h3>${s.catalog.categories.map((c) => `<div class="row between small"><span>${esc(c.name)} ${c.active ? '' : '<span class="badge gray">inactive</span>'}</span><b>${c.items}</b></div>`).join('')}</div>
+  </div>
+  <div class="card row wrap" style="margin-top:14px"><span class="grow small mute">Want to preview the reports? Generate ~1 year of sample sales (marked as demo, removable).</span><button class="ghost" id="dm">Generate demo sales</button><button class="line" id="dc">Remove demo sales</button></div>`;
+  $$('[data-p]').forEach((b) => b.onclick = () => { C.period = b.dataset.p; vDash(); });
+  $('#dm').onclick = () => act(async () => { await api.post('/demo-sales'); vDash(); }, 'Demo sales generated');
+  $('#dc').onclick = () => act(async () => { await api.del('/demo-sales'); vDash(); }, 'Demo sales removed');
+}
+
+// ------------------------------------------------------------------ appointments
+async function vAppts() {
+  const t0 = ymdOf(new Date()), t1 = ymdOf(new Date(Date.now() + 30 * 86400000));
+  const f = C.filters || (C.filters = { from: t0, to: t1, status: '', q: '' });
+  main().innerHTML = `<h1>Appointments <span class="small mute">(paid bookings only)</span></h1><div class="tools">
+    <label class="small mute">From <input type="date" id="ff" value="${f.from}"></label><label class="small mute">To <input type="date" id="ft" value="${f.to}"></label>
+    <select id="fs" aria-label="Status"><option value="">All statuses</option>${['scheduled', 'in_progress', 'completed', 'no_show', 'cancelled'].map((s) => `<option value="${s}" ${f.status === s ? 'selected' : ''}>${STATUS[s][0]}</option>`).join('')}</select>
+    <input id="fq" type="search" placeholder="Search customer, phone, service, order…" value="${esc(f.q)}" style="min-width:260px"><button class="line" id="fa">All dates</button></div>
+    <div class="card flush scroll"><table><thead><tr><th>Date & time</th><th>Customer</th><th>Service</th><th>Where</th><th>Service person</th><th>Progress</th><th>Payment</th></tr></thead><tbody id="tb"><tr><td colspan="7" class="mute">Loading…</td></tr></tbody></table></div>`;
+  const load = async () => {
+    const qs = new URLSearchParams({ from: f.from, to: f.to, status: f.status, q: f.q });
+    const rows = await api.get('/appointments?' + qs);
+    $('#tb').innerHTML = rows.map((a) => `<tr class="click" data-id="${a.id}"><td><b>${fmtDate(a.date)}</b><div class="small mute">${fmtTime(a.time)} – ${fmtTime(a.endTime)}</div></td>
+      <td>${esc(a.customer.name)}<div class="small mute">${esc(a.customer.phone)}</div></td>
+      <td>${esc(a.name)}${a.addons.length ? `<div class="small mute">+ ${a.addons.map((x) => esc(x.name)).join(', ')}</div>` : ''}${a.remark ? '<div class="small">📝 has remark</div>' : ''}</td>
+      <td>${a.areaType === 'home' ? '🏠 Home' : '🏪 Shop'}<div class="small mute">${esc(a.areaName)}</div></td><td>${esc(a.staffName) || '-'}</td><td>${statusBadge(a.status)}${a.review ? ` <span class="stars small">★${a.review.rating}</span>` : ''}</td>
+      <td><span class="badge ok">Paid</span><div class="small mute">${rm(a.price)} · ${esc(a.orderNo)}</div></td></tr>`).join('') || '<tr><td colspan="7" class="mute">No appointments match.</td></tr>';
+    $$('#tb tr.click').forEach((tr) => tr.onclick = () => apptModal(rows.find((r) => r.id === tr.dataset.id), load));
+  };
+  const apply = () => { f.from = $('#ff').value; f.to = $('#ft').value; f.status = $('#fs').value; f.q = $('#fq').value; load().catch((e) => toast(e.message, 'bad')); };
+  ['ff', 'ft', 'fs'].forEach((i) => $('#' + i).onchange = apply);
+  let t; $('#fq').oninput = () => { clearTimeout(t); t = setTimeout(apply, 250); };
+  $('#fa').onclick = () => { $('#ff').value = ''; $('#ft').value = ''; apply(); };
+  await load();
+  pollTimer = setInterval(() => { if (!$('.modal-bg')) load().catch(() => {}); }, 20000);
+}
+async function apptModal(a, reload) {
+  const o = a.order, pay = o.payment;
+  const free = await api.get(`/appointments/${a.id}/staff`).catch(() => []);
+  const staffOpts = [...(a.staffId && !free.some((s) => s.id === a.staffId) ? [{ id: a.staffId, name: a.staffName }] : []), ...free];
+  const m = openModal(`<div class="row between"><h2 style="margin:0">${esc(a.name)}</h2>${statusBadge(a.status)}</div>
+  <div class="stack" style="margin-top:12px">
+  <div class="card"><div class="b">Customer</div>${esc(a.customer.name)} · <a href="https://wa.me/${esc(a.customer.phone.replace(/\D/g, '').replace(/^0/, '60'))}" target="_blank" rel="noopener">${esc(a.customer.phone)}</a> · ${esc(a.customer.email)}</div>
+  <div class="card"><div class="b">Appointment</div><div>📅 ${fmtDate(a.date)} · ${fmtTime(a.time)} – ${fmtTime(a.endTime)} (${a.durationMin} min)</div>
+    ${a.addons.length ? `<div>Add-ons: ${a.addons.map((x) => `${esc(x.name)} (${rm(x.price)})`).join(', ')}</div>` : ''}
+    <div>${a.areaType === 'home' ? '🏠 Home service — ' + esc(a.address) : '🏪 In shop — ' + esc(a.areaName)}</div>
+    <div style="margin-top:6px;padding:8px;background:var(--warn-soft);border-radius:8px">📝 Customer remark: ${a.remark ? esc(a.remark) : '<span class="mute">none</span>'}</div>
+    <label class="f">Service person</label><select id="sp">${staffOpts.map((s) => `<option value="${s.id}" ${s.id === a.staffId ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></div>
+  <div class="card"><div class="b">Payment confirmation</div>${pay ? `<div>✅ Paid ${rm(o.total)} by ${esc(PAY[pay.method] || pay.method)} · ref <b>${esc(pay.ref)}</b> · ${fmtStamp(pay.paidAt)}</div>` : '<div class="err">Not paid</div>'}
+    <div class="small mute">Order ${esc(o.no)} · subtotal ${rm(o.subtotal)}${o.discount ? ` · voucher ${esc(o.voucherCode)} −${rm(o.discount)}` : ''}${(o.charges || []).map((c) => ` · ${esc(c.name)} ${rm(c.amount)}`).join('')}</div>
+    <div>⭐ Loyalty points earned for this order: <b>${o.points}</b></div></div>
+  <div class="card"><div class="b">Appointment progress</div><div class="row wrap" style="margin-top:6px">
+    ${[['scheduled', 'Scheduled'], ['in_progress', 'Start service'], ['completed', 'Mark completed'], ['no_show', 'No show'], ['cancelled', 'Cancel']].map(([s, l]) => `<button class="${a.status === s ? '' : s === 'cancelled' || s === 'no_show' ? 'danger' : 'ghost'} sm" data-st="${s}" ${a.status === s ? 'disabled' : ''}>${l}</button>`).join('')}</div>
+    <p class="small mute" style="margin:8px 0 0">Cancelling frees the slot. Refunds are handled outside this system.</p></div>
+  <div class="card"><div class="b">Reminder & review</div><div class="small">${a.reminderAt ? '🔔 Reminder sent ' + fmtStamp(a.reminderAt) : 'Reminder will be sent automatically one day before.'}</div>
+    <button class="sm line" id="rem" style="margin:6px 0">Send reminder now</button>
+    <div>${a.review ? `<span class="stars">${stars(a.review.rating)}</span> ${esc(a.review.comment)}` : '<span class="mute small">No review yet</span>'}</div></div>
+  <button class="line" data-close>Close</button></div>`, true);
+  $$('[data-st]', m.el).forEach((b) => b.onclick = () => {
+    if (b.dataset.st === 'cancelled' && !confirmBox('Cancel this appointment? The slot will be released.')) return;
+    act(async () => { await api.put('/appointments/' + a.id, { status: b.dataset.st }); m.close(); reload(); }, 'Updated');
+  });
+  $('#sp', m.el).onchange = (e) => act(async () => { await api.put('/appointments/' + a.id, { staffId: e.target.value }); reload(); }, 'Service person updated');
+  $('#rem', m.el).onclick = () => act(async () => { await api.post(`/appointments/${a.id}/remind`); }, 'Reminder sent (see Reminders log)');
+}
+
+// ------------------------------------------------------------------ categories
+async function vCats() {
+  await getAll();
+  main().innerHTML = `<div class="row between"><h1>Service categories</h1><button id="add">+ Add category</button></div>
+  <div class="card flush scroll"><table><thead><tr><th>Order</th><th>Category</th><th>Services</th><th>Status</th><th></th></tr></thead><tbody>${C.cats.map((c) => `<tr><td>${c.sort}</td><td>${esc(c.icon)} <b>${esc(c.name)}</b></td><td>${c.items}</td>
+    <td><label class="chk"><input type="checkbox" data-act="${c.id}" ${c.active ? 'checked' : ''}> ${c.active ? 'Active' : 'Inactive'}</label></td><td class="right"><button class="sm ghost" data-ed="${c.id}">Edit</button> <button class="sm danger" data-del="${c.id}">Delete</button></td></tr>`).join('') || '<tr><td colspan="5" class="mute">No categories yet.</td></tr>'}</tbody></table></div>
+  <p class="small mute">Inactive categories are hidden from customers (their services stay saved).</p>`;
+  const form = (c) => formModal({
+    title: c ? 'Edit category' : 'New category', values: c || { active: true, sort: (C.cats.length + 1) * 10 },
+    fields: [{ k: 'name', label: 'Category name (e.g. Facial, Dog grooming)' }, { k: 'icon', label: 'Icon (emoji, optional)', ph: '✨' }, { k: 'sort', label: 'Display order', type: 'number' }, { k: 'active', label: 'Active', type: 'check' }],
+    onSave: async (v) => { c ? await api.put('/categories/' + c.id, v) : await api.post('/categories', v); vCats(); },
+  });
+  $('#add').onclick = () => form();
+  $$('[data-ed]').forEach((b) => b.onclick = () => form(C.cats.find((c) => c.id === b.dataset.ed)));
+  $$('[data-act]').forEach((b) => b.onchange = () => act(async () => { await api.put('/categories/' + b.dataset.act, { active: b.checked }); vCats(); }));
+  $$('[data-del]').forEach((b) => b.onclick = () => confirmBox('Delete this category?') && act(async () => { await api.del('/categories/' + b.dataset.del); vCats(); }, 'Deleted'));
+}
+
+// ------------------------------------------------------------------ services (item library)
+async function vItems() {
+  await getAll();
+  const catName = (id) => (C.cats.find((c) => c.id === id) || {}).name;
+  main().innerHTML = `<div class="row between"><h1>Services</h1><button id="add">+ Add service</button></div>
+  <p class="mute small">Create every service here (including small items you only want to sell as add-ons). Then use <b>Catalog & tagging</b> to list them under categories, tag Top picks, set promotions and add-ons.</p>
+  <div class="card flush scroll"><table><thead><tr><th></th><th>Service</th><th>Price</th><th>Duration</th><th>Category</th><th>Status</th><th></th></tr></thead><tbody>${C.items.map((i) => `<tr><td>${thumb({ images: i.images, name: i.name })}</td>
+    <td><b>${esc(i.name)}</b><div class="small mute">${esc((i.description || '').slice(0, 70))}</div></td><td>${i.promoOn ? `<span class="strike">${rm(i.price)}</span> <b class="promo">${rm(i.effPrice)}</b>` : rm(i.price)}</td><td>${i.durationMin} min</td>
+    <td>${catName(i.categoryId) ? esc(catName(i.categoryId)) : '<span class="badge gray">Add-on only / not listed</span>'}</td><td>${i.active ? '<span class="badge ok">Active</span>' : '<span class="badge gray">Inactive</span>'}</td>
+    <td class="right"><button class="sm ghost" data-ed="${i.id}">Edit</button> <button class="sm danger" data-del="${i.id}">Delete</button></td></tr>`).join('') || '<tr><td colspan="7" class="mute">No services yet.</td></tr>'}</tbody></table></div>`;
+  const form = (i) => formModal({
+    title: i ? 'Edit service' : 'New service', values: i ? { ...i, images: [...i.images] } : { active: true, durationMin: 60, images: [], categoryId: '' },
+    fields: [{ k: 'name', label: 'Service / item name' }, { k: 'description', label: 'Description', type: 'textarea' }, { k: 'price', label: 'Price (RM)', type: 'number', step: '0.01' },
+      { k: 'durationMin', label: 'Duration (minutes)', type: 'number' }, { k: 'categoryId', label: 'List under category', type: 'select', options: catOptions('— Not listed (usable as add-on only) —') },
+      { k: 'images', label: 'Photos (you can upload several)', type: 'images' }, { k: 'active', label: 'Active', type: 'check' }],
+    onSave: async (v) => { i ? await api.put('/items/' + i.id, v) : await api.post('/items', v); vItems(); },
+  });
+  $('#add').onclick = () => form();
+  $$('[data-ed]').forEach((b) => b.onclick = () => form(C.items.find((c) => c.id === b.dataset.ed)));
+  $$('[data-del]').forEach((b) => b.onclick = () => confirmBox('Delete this service?') && act(async () => { await api.del('/items/' + b.dataset.del); vItems(); }, 'Deleted'));
+}
+
+// ------------------------------------------------------------------ catalog & tagging (+ add-ons)
+async function vCatalog() {
+  await getAll();
+  main().innerHTML = `<h1>Catalog & tagging</h1><p class="small mute">Inside each category add existing services. Tag them <b>Recommended / Top pick</b>, set a promotion (price before → after with a period) and build <b>ADD ON / Option</b> groups from other services with a bundle price.</p>
+  <div class="stack">${C.cats.map((c) => {
+    const list = C.items.filter((i) => i.categoryId === c.id), pool = C.items.filter((i) => i.categoryId !== c.id);
+    return `<div class="card"><div class="row between wrap"><h2 style="margin:0">${esc(c.icon)} ${esc(c.name)} ${c.active ? '' : '<span class="badge gray">inactive</span>'}</h2>
+      <div class="row"><select data-pool="${c.id}" style="width:240px"><option value="">+ Add existing service…</option>${pool.map((i) => `<option value="${i.id}">${esc(i.name)}${i.categoryId ? ' (move from ' + esc((C.cats.find((x) => x.id === i.categoryId) || {}).name) + ')' : ''}</option>`).join('')}</select></div></div>
+      <div class="scroll"><table><tbody>${list.map((i) => `<tr><td style="width:64px">${thumb({ images: i.images, name: i.name })}</td><td><b>${esc(i.name)}</b><div class="small mute">${rm(i.price)} · ${i.durationMin} min · ${i.groups.length} add-on group(s)</div></td>
+        <td>${i.topPick ? '<span class="badge warn">🔥 Top pick</span> ' : ''}${i.recommended ? '<span class="badge ok">👍 Recommended</span> ' : ''}${i.promoPrice != null ? `<span class="badge ${i.promoOn ? 'bad' : 'gray'}">${rm(i.price)} → ${rm(i.promoPrice)}${i.promoTo ? ' · till ' + i.promoTo : ''}${i.promoOn ? '' : ' (not running)'}</span>` : ''}</td>
+        <td class="right"><button class="sm ghost" data-tag="${i.id}">Tags & promo</button> <button class="sm ghost" data-addon="${i.id}">Add-ons (${i.groups.length})</button> <button class="sm line" data-unlist="${i.id}">Remove</button></td></tr>`).join('') || '<tr><td class="mute">No services in this category yet.</td></tr>'}</tbody></table></div></div>`;
+  }).join('') || '<div class="card mute">Create a category first.</div>'}</div>`;
+  $$('[data-pool]').forEach((s) => s.onchange = () => s.value && act(async () => { await api.put('/items/' + s.value, { categoryId: s.dataset.pool }); vCatalog(); }, 'Added to category'));
+  $$('[data-unlist]').forEach((b) => b.onclick = () => act(async () => { await api.put('/items/' + b.dataset.unlist, { categoryId: '' }); vCatalog(); }, 'Removed from category'));
+  $$('[data-tag]').forEach((b) => b.onclick = () => {
+    const i = C.items.find((x) => x.id === b.dataset.tag);
+    formModal({
+      title: `Tags & promotion — ${i.name}`, values: { ...i, promoPrice: i.promoPrice == null ? '' : i.promoPrice }, note: 'Leave the promo price empty for no promotion. Customers see the old price struck through and the new price in red during the promo period.',
+      fields: [{ k: 'recommended', label: '👍 Recommended', type: 'check' }, { k: 'topPick', label: '🔥 Top pick', type: 'check' }, { k: 'price', label: 'Normal price (RM)', type: 'number', step: '0.01' },
+        { k: 'promoPrice', label: 'Promo price (RM) — price after', type: 'number', step: '0.01' }, { k: 'promoFrom', label: 'Promo starts', type: 'date' }, { k: 'promoTo', label: 'Promo ends', type: 'date' },
+        { k: 'areaIds', label: 'Available at (leave all unticked = every service area)', type: 'multi', options: C.areas.map((a) => ({ v: a.id, l: `${a.type === 'home' ? '🏠' : '🏪'} ${a.name}` })) }, { k: 'active', label: 'Active (visible to customers)', type: 'check' }],
+      onSave: async (v) => { await api.put('/items/' + i.id, v); vCatalog(); },
+    });
+  });
+  $$('[data-addon]').forEach((b) => b.onclick = () => addonEditor(C.items.find((x) => x.id === b.dataset.addon)));
+}
+function addonEditor(item) {
+  const groups = JSON.parse(JSON.stringify(item.groups));
+  const pool = C.items.filter((i) => i.id !== item.id);
+  const m = openModal(`<h2>ADD ON / Options — ${esc(item.name)}</h2><p class="small mute">Add sub-categories such as "Extra ADD ON". Pick existing services as options; the price defaults to the service price but you can lower it for a bundle deal. <b>Compulsory</b> groups must be chosen by the customer.</p>
+    <div id="gs"></div><button class="ghost" id="ag">+ Add sub-category</button><p class="err" id="fe" role="alert"></p><div class="row" style="margin-top:12px"><button class="line grow" data-close>Cancel</button><button class="grow" id="sv">Save add-ons</button></div>`, true);
+  const paint = () => {
+    $('#gs', m.el).innerHTML = groups.map((g, gi) => `<div class="grp" data-gi="${gi}"><div class="row wrap"><input class="grow" data-f="name" value="${esc(g.name)}" placeholder="Sub-category name e.g. ADD ON" aria-label="Group name">
+      <select data-f="required" style="width:150px" aria-label="Compulsory?"><option value="0" ${g.required ? '' : 'selected'}>Optional</option><option value="1" ${g.required ? 'selected' : ''}>Compulsory</option></select>
+      <label class="small mute row">Max <input type="number" min="0" data-f="max" value="${g.max}" style="width:70px" aria-label="Max choices"></label><button class="sm danger" data-delg="${gi}">Remove</button></div>
+      ${g.options.map((o, oi) => `<div class="row" style="margin-top:8px"><div class="grow">${esc((C.items.find((i) => i.id === o.itemId) || { name: o.name }).name)} <span class="small mute">(normal ${rm((C.items.find((i) => i.id === o.itemId) || { price: 0 }).price)})</span></div>
+        <label class="small mute">Price RM <input type="number" step="0.01" min="0" data-o="${oi}" value="${o.price}" style="width:100px"></label><button class="sm line" data-delo="${gi}:${oi}" aria-label="Remove option">×</button></div>`).join('')}
+      <div class="row" style="margin-top:10px"><select data-addsel="${gi}" class="grow"><option value="">+ Add existing service as option…</option>${pool.filter((p) => !g.options.some((o) => o.itemId === p.id)).map((p) => `<option value="${p.id}">${esc(p.name)} — ${rm(p.price)}</option>`).join('')}</select></div></div>`).join('') || '<p class="mute">No add-on groups yet.</p>';
+  };
+  paint();
+  m.el.addEventListener('input', (e) => {
+    const gEl = e.target.closest('[data-gi]'); if (!gEl) return; const g = groups[Number(gEl.dataset.gi)];
+    if (e.target.dataset.f === 'name') g.name = e.target.value;
+    else if (e.target.dataset.f === 'max') g.max = Number(e.target.value) || 0;
+    else if (e.target.dataset.o !== undefined) g.options[Number(e.target.dataset.o)].price = e.target.value;
+  });
+  m.el.addEventListener('change', (e) => {
+    const gEl = e.target.closest('[data-gi]'); if (!gEl) return; const g = groups[Number(gEl.dataset.gi)];
+    if (e.target.dataset.f === 'required') g.required = e.target.value === '1';
+    if (e.target.dataset.addsel !== undefined && e.target.value) { const p = pool.find((x) => x.id === e.target.value); g.options.push({ itemId: p.id, name: p.name, price: p.price }); paint(); }
+  });
+  m.el.addEventListener('click', (e) => {
+    const dg = e.target.closest('[data-delg]'), dof = e.target.closest('[data-delo]');
+    if (dg) { groups.splice(Number(dg.dataset.delg), 1); paint(); }
+    if (dof) { const [gi, oi] = dof.dataset.delo.split(':').map(Number); groups[gi].options.splice(oi, 1); paint(); }
+  });
+  $('#ag', m.el).onclick = () => { groups.push({ name: 'ADD ON', required: false, max: 0, options: [] }); paint(); };
+  $('#sv', m.el).onclick = async () => {
+    try { await api.put('/items/' + item.id, { groups }); m.close(); toast('Add-ons saved'); vCatalog(); } catch (er) { $('#fe', m.el).textContent = er.message; }
+  };
+}
+
+// ------------------------------------------------------------------ service persons
+async function vStaff() {
+  await getAll();
+  const svc = (id) => (C.items.find((i) => i.id === id) || {}).name;
+  main().innerHTML = `<div class="row between"><h1>Service persons</h1><button id="add">+ Add service person</button></div>
+  <p class="small mute">Tag each person with the services they can perform. A time slot is only offered to customers while at least one tagged person is free.</p>
+  <div class="card flush scroll"><table><thead><tr><th>Name</th><th>Skills / services</th><th>Works</th><th>Status</th><th></th></tr></thead><tbody>${C.staff.map((s) => `<tr><td><b>${esc(s.name)}</b><div class="small mute">${esc(s.phone)}</div></td>
+    <td>${s.serviceIds.map((id) => `<span class="badge">${esc(svc(id))}</span>`).join(' ') || '<span class="mute">none</span>'}</td>
+    <td class="small">${s.workDays.map((d) => DAYS[d]).join(', ') || '-'}<div class="mute">${s.start ? s.start + '–' + s.end : 'business hours'}${s.offDates.length ? ' · ' + s.offDates.length + ' day(s) off' : ''}</div></td>
+    <td>${s.active ? '<span class="badge ok">Active</span>' : '<span class="badge gray">Inactive</span>'}</td><td class="right"><button class="sm ghost" data-ed="${s.id}">Edit</button> <button class="sm danger" data-del="${s.id}">Delete</button></td></tr>`).join('') || '<tr><td colspan="5" class="mute">No service persons yet.</td></tr>'}</tbody></table></div>`;
+  const form = (s) => formModal({
+    title: s ? 'Edit service person' : 'New service person', wide: true,
+    values: s ? { ...s, workDays: s.workDays.map(String), offDates: s.offDates.join(', ') } : { active: true, serviceIds: [], workDays: ['1', '2', '3', '4', '5', '6'], offDates: '' },
+    fields: [{ k: 'name', label: 'Name' }, { k: 'phone', label: 'Phone' }, { k: 'email', label: 'Email' },
+      { k: 'serviceIds', label: 'Services this person can do (skill tags)', type: 'multi', options: C.items.filter((i) => i.active).map((i) => ({ v: i.id, l: i.name })) },
+      { k: 'workDays', label: 'Working days', type: 'multi', options: DAYS.map((d, i) => ({ v: String(i), l: d })) },
+      { k: 'start', label: 'Start time (optional — blank follows business hours)', type: 'time' }, { k: 'end', label: 'End time (optional)', type: 'time' },
+      { k: 'offDates', label: 'Days off / leave (YYYY-MM-DD, comma separated)', type: 'textarea' }, { k: 'active', label: 'Active', type: 'check' }],
+    onSave: async (v) => {
+      v.workDays = v.workDays.map(Number); v.offDates = String(v.offDates).split(/[\s,;]+/).filter(Boolean);
+      s ? await api.put('/staff/' + s.id, v) : await api.post('/staff', v); vStaff();
+    },
+  });
+  $('#add').onclick = () => form();
+  $$('[data-ed]').forEach((b) => b.onclick = () => form(C.staff.find((c) => c.id === b.dataset.ed)));
+  $$('[data-del]').forEach((b) => b.onclick = () => confirmBox('Delete this service person?') && act(async () => { await api.del('/staff/' + b.dataset.del); vStaff(); }, 'Removed'));
+}
+
+// ------------------------------------------------------------------ available days & time slots
+async function vSched() {
+  const s = await api.get('/settings');
+  main().innerHTML = `<h1>Available days & time slots</h1><div class="grid2"><div class="card"><h3>Weekly opening hours</h3>
+    <table><tbody>${s.week.map((w, i) => `<tr><td style="width:60px"><b>${DAYS[i]}</b></td><td><label class="chk"><input type="checkbox" data-on="${i}" ${w.on ? 'checked' : ''}> Open</label></td><td><input type="time" data-st="${i}" value="${w.start}" aria-label="${DAYS[i]} open"></td><td><input type="time" data-en="${i}" value="${w.end}" aria-label="${DAYS[i]} close"></td></tr>`).join('')}</tbody></table></div>
+  <div class="card stack"><h3>Slot rules</h3>
+    <div><label class="f" for="sm">Slot interval (minutes)</label><input id="sm" type="number" value="${s.slotMinutes}"></div>
+    <div><label class="f" for="lm">Minimum notice before a booking (minutes)</label><input id="lm" type="number" value="${s.leadMinutes}"></div>
+    <div><label class="f" for="md">How many days ahead customers can book</label><input id="md" type="number" value="${s.maxDaysAhead}"></div>
+    <p class="small mute">A slot disappears for customers once no tagged service person is free for it (including the service duration).</p></div></div>
+  <div class="card" style="margin-top:14px"><h3>Closed dates (public holidays, leave)</h3><div class="row"><input type="date" id="cd" style="width:auto"><button class="ghost" id="cda">Add closed date</button></div>
+    <div id="cdl" class="row wrap" style="margin-top:10px">${s.closedDates.map((d) => `<span class="badge bad">${d} <a href="#" data-rmd="${d}" style="color:inherit">×</a></span>`).join('') || '<span class="mute small">None</span>'}</div></div>
+  <button id="sv" style="margin-top:14px">Save schedule</button>`;
+  let closed = [...s.closedDates];
+  const paintClosed = () => { $('#cdl').innerHTML = closed.map((d) => `<span class="badge bad">${d} <a href="#" data-rmd="${d}" style="color:inherit" aria-label="Remove">×</a></span>`).join('') || '<span class="mute small">None</span>'; };
+  $('#cda').onclick = () => { const v = $('#cd').value; if (v && !closed.includes(v)) { closed.push(v); closed.sort(); paintClosed(); } };
+  $('#cdl').onclick = (e) => { const a = e.target.closest('[data-rmd]'); if (a) { e.preventDefault(); closed = closed.filter((d) => d !== a.dataset.rmd); paintClosed(); } };
+  $('#sv').onclick = () => act(async () => {
+    await api.put('/settings', {
+      week: s.week.map((_, i) => ({ on: $(`[data-on="${i}"]`).checked, start: $(`[data-st="${i}"]`).value, end: $(`[data-en="${i}"]`).value })),
+      slotMinutes: $('#sm').value, leadMinutes: $('#lm').value, maxDaysAhead: $('#md').value, closedDates: closed,
+    });
+  }, 'Schedule saved');
+}
+
+// ------------------------------------------------------------------ service areas
+async function vAreas() {
+  await getAll();
+  main().innerHTML = `<div class="row between"><h1>Service areas</h1><button id="add">+ Add area</button></div>
+  <p class="small mute"><b>In shop</b> = customer visits one of your branches. <b>Home service</b> = you travel to the customer (they key in their address); you can add a travel fee per area.</p>
+  <div class="card flush scroll"><table><thead><tr><th>Type</th><th>Name</th><th>Address</th><th>Travel fee</th><th>Status</th><th></th></tr></thead><tbody>${C.areas.map((a) => `<tr><td>${a.type === 'home' ? '🏠 Home service' : '🏪 In shop'}</td><td><b>${esc(a.name)}</b></td><td class="small">${esc(a.address)}</td><td>${a.type === 'home' ? rm(a.fee) : '-'}</td>
+    <td>${a.active ? '<span class="badge ok">Active</span>' : '<span class="badge gray">Inactive</span>'}</td><td class="right"><button class="sm ghost" data-ed="${a.id}">Edit</button> <button class="sm danger" data-del="${a.id}">Delete</button></td></tr>`).join('') || '<tr><td colspan="6" class="mute">No areas yet — customers cannot book until you add one.</td></tr>'}</tbody></table></div>`;
+  const form = (a) => formModal({
+    title: a ? 'Edit area' : 'New area', values: a || { type: 'shop', active: true, fee: 0 },
+    fields: [{ k: 'type', label: 'Type', type: 'select', options: [{ v: 'shop', l: 'In shop' }, { v: 'home', l: 'Home service' }] }, { k: 'name', label: 'Name (branch or coverage area)' }, { k: 'address', label: 'Address (shop) / coverage notes (home)', type: 'textarea' },
+      { k: 'fee', label: 'Travel fee (RM, home service only)', type: 'number', step: '0.01' }, { k: 'active', label: 'Active', type: 'check' }],
+    onSave: async (v) => { a ? await api.put('/areas/' + a.id, v) : await api.post('/areas', v); vAreas(); },
+  });
+  $('#add').onclick = () => form();
+  $$('[data-ed]').forEach((b) => b.onclick = () => form(C.areas.find((c) => c.id === b.dataset.ed)));
+  $$('[data-del]').forEach((b) => b.onclick = () => confirmBox('Delete this area?') && act(async () => { await api.del('/areas/' + b.dataset.del); vAreas(); }, 'Deleted'));
+}
+
+// ------------------------------------------------------------------ customers & vouchers
+async function vCust() {
+  const [cs, vs] = await Promise.all([api.get('/customers'), api.get('/vouchers')]);
+  main().innerHTML = `<div class="row between wrap"><h1>Customers & vouchers</h1><button id="av">🎟 Assign voucher to selected</button></div>
+  <div class="card flush scroll"><table><thead><tr><th></th><th>Customer</th><th>Contact</th><th>Orders</th><th>Spent</th><th>Points</th></tr></thead><tbody>${cs.map((c) => `<tr><td><input type="checkbox" data-c="${c.id}" aria-label="Select ${esc(c.name)}"></td><td><b>${esc(c.name)}</b></td><td class="small">${esc(c.phone)}<br>${esc(c.email)}</td><td>${c.orders}</td><td>${rm(c.spent)}</td><td>⭐ ${c.points}</td></tr>`).join('') || '<tr><td colspan="6" class="mute">No customers yet.</td></tr>'}</tbody></table></div>
+  <h2 style="margin-top:22px">Vouchers issued</h2><p class="small mute">Vouchers are applied automatically to the customer's next purchase (the best unused one).</p>
+  <div class="card flush scroll"><table><thead><tr><th>Code</th><th>Customer</th><th>Value</th><th>Expiry</th><th>Note</th><th>Status</th><th></th></tr></thead><tbody>${vs.map((v) => `<tr><td><b>${esc(v.code)}</b></td><td>${esc(v.customerName)}</td><td>${v.type === 'percent' ? v.value + '%' : rm(v.value)}</td><td>${v.expiry || '-'}</td><td class="small">${esc(v.note)}</td>
+    <td><span class="badge ${v.state === 'active' ? 'ok' : 'gray'}">${v.state}</span></td><td class="right">${v.state === 'used' ? '' : `<button class="sm danger" data-dv="${v.id}">Revoke</button>`}</td></tr>`).join('') || '<tr><td colspan="7" class="mute">No vouchers yet.</td></tr>'}</tbody></table></div>`;
+  $('#av').onclick = () => {
+    const ids = $$('[data-c]:checked').map((x) => x.dataset.c);
+    if (!ids.length) return toast('Tick one or more customers first', 'bad');
+    formModal({
+      title: `Assign voucher to ${ids.length} customer(s)`, values: { type: 'amount', value: 10, expiry: ymdOf(new Date(Date.now() + 60 * 86400000)), note: '' },
+      fields: [{ k: 'type', label: 'Discount type', type: 'select', options: [{ v: 'amount', l: 'Fixed amount (RM)' }, { v: 'percent', l: 'Percentage (%)' }] }, { k: 'value', label: 'Value', type: 'number', step: '0.01' }, { k: 'expiry', label: 'Valid until', type: 'date' }, { k: 'note', label: 'Note (e.g. Thank you voucher)' }],
+      onSave: async (v) => { const r = await api.post('/vouchers', { ...v, customerIds: ids }); toast(r.created + ' voucher(s) created'); vCust(); },
+    });
+  };
+  $$('[data-dv]').forEach((b) => b.onclick = () => act(async () => { await api.del('/vouchers/' + b.dataset.dv); vCust(); }, 'Voucher revoked'));
+}
+
+// ------------------------------------------------------------------ reviews & reminders log
+async function vReviews() {
+  const rs = await api.get('/reviews');
+  const avg = rs.length ? (rs.reduce((s, r) => s + r.rating, 0) / rs.length).toFixed(1) : '-';
+  main().innerHTML = `<h1>Customer reviews</h1><div class="kpis" style="margin-bottom:14px"><div class="card kpi"><div class="small mute">Average rating</div><div class="v">⭐ ${avg}</div></div><div class="card kpi"><div class="small mute">Reviews</div><div class="v">${rs.length}</div></div></div>
+  <div class="stack">${rs.map((r) => `<div class="card"><div class="row between"><div><b>${esc(r.itemName)}</b> <span class="mute small">by ${esc(r.customerName)}</span></div><span class="stars">${stars(r.rating)}</span></div><div>${esc(r.comment) || '<span class="mute">(no comment)</span>'}</div><div class="small mute">${fmtStamp(r.createdAt)}</div></div>`).join('') || '<div class="card mute">No reviews yet. Customers can review a service once the appointment is marked completed.</div>'}</div>`;
+}
+async function vOutbox() {
+  const o = await api.get('/outbox');
+  main().innerHTML = `<h1>Reminders log</h1><div class="card" style="margin-bottom:14px">Automatic reminders go out <b>one day before</b> each appointment (from the hour set in Settings), by WhatsApp and email, plus an instant confirmation after payment.
+    <div class="row wrap" style="margin-top:8px"><span class="badge ${o.live.whatsapp ? 'ok' : 'warn'}">WhatsApp: ${o.live.whatsapp ? 'live' : 'simulation (not connected)'}</span><span class="badge ${o.live.email ? 'ok' : 'warn'}">Email: ${o.live.email ? 'live' : 'simulation (not connected)'}</span></div></div>
+  <div class="card flush scroll"><table><thead><tr><th>When</th><th>Type</th><th>Channel</th><th>To</th><th>Message</th><th>Status</th></tr></thead><tbody>${o.rows.map((r) => `<tr><td class="small">${fmtStamp(r.at)}</td><td>${r.kind}</td><td>${r.channel === 'whatsapp' ? '💬 WhatsApp' : '✉ Email'}</td><td class="small">${esc(r.to)}</td><td class="small" style="white-space:pre-line;max-width:380px">${esc(r.text)}</td>
+    <td><span class="badge ${r.status === 'sent' ? 'ok' : r.status === 'failed' ? 'bad' : 'warn'}" title="${esc(r.error)}">${r.status}</span></td></tr>`).join('') || '<tr><td colspan="6" class="mute">Nothing sent yet.</td></tr>'}</tbody></table></div>`;
+}
+
+// ------------------------------------------------------------------ profile & settings
+async function vSet() {
+  const [p, s] = await Promise.all([api.get('/profile'), api.get('/settings')]);
+  C.profile = p;
+  main().innerHTML = `<h1>Profile & settings</h1><div class="grid2">
+  <div class="card stack"><h3>Business profile</h3><div class="row">${p.photo ? `<img class="thumb" src="${esc(p.photo)}" alt="" style="width:72px;height:72px">` : '<div class="thumb">🏪</div>'}<div><div class="b">${esc(p.name)}</div><div class="small mute">${esc(p.industry)}</div></div></div>
+    <button class="ghost" id="ep">Edit profile & photo</button></div>
+  <div class="card stack"><h3>Your customer link</h3><input id="lk" readonly value="${esc(location.origin + '/shop/' + p.slug)}" aria-label="Customer link"><div class="row"><button id="cp" class="ghost">Copy link</button><a class="btn line" href="/shop/${esc(p.slug)}" target="_blank" rel="noopener">Open ↗</a></div><div id="qr" style="margin-top:6px"></div><p class="small mute">Share this link or print the QR code so customers can book.</p></div>
+  <div class="card stack"><h3>Additional charges</h3><p class="small mute" style="margin:0">SST / GST / service charge — added to every order (on the amount after voucher). Untick or delete to turn off.</p><div id="chg"></div><button class="ghost sm" id="ac">+ Add charge</button></div>
+  <div class="card stack"><h3>Loyalty, payment & reminders</h3>
+    <div><label class="f" for="pp">Loyalty points earned per RM 1 paid</label><input id="pp" type="number" step="0.1" value="${s.pointsPerRM}"></div>
+    <div><label class="f" for="hm">Slot hold while customer pays (minutes)</label><input id="hm" type="number" value="${s.holdMinutes}"></div>
+    <div><label class="f" for="rh">Send reminders from this hour on the day before (0-23)</label><input id="rh" type="number" min="0" max="23" value="${s.reminderHour}"></div>
+    <label class="chk"><input type="checkbox" id="rw" ${s.reminderWhatsapp ? 'checked' : ''}> Remind by WhatsApp</label><label class="chk"><input type="checkbox" id="re" ${s.reminderEmail ? 'checked' : ''}> Remind by email</label>
+    <button id="ss">Save settings</button></div>
+  <div class="card stack"><h3>Change password</h3><input id="pw0" type="password" placeholder="Current password" autocomplete="current-password"><input id="pw1" type="password" placeholder="New password (min 6)" autocomplete="new-password"><button class="ghost" id="cpw">Change password</button></div></div>`;
+  if (window.QRCode) new QRCode($('#qr'), { text: $('#lk').value, width: 150, height: 150 });
+  $('#cp').onclick = () => { $('#lk').select(); navigator.clipboard ? navigator.clipboard.writeText($('#lk').value).then(() => toast('Link copied')) : document.execCommand('copy'); };
+  $('#ep').onclick = () => formModal({
+    title: 'Business profile', values: { ...p }, fields: [{ k: 'photo', label: 'Business photo / logo', type: 'images', single: true }, { k: 'name', label: 'Business name' }, { k: 'industry', label: 'Industry (e.g. Beauty, Pet grooming)' },
+      { k: 'about', label: 'About', type: 'textarea' }, { k: 'phone', label: 'Phone' }, { k: 'address', label: 'Address', type: 'textarea' }],
+    onSave: async (v) => { await api.put('/profile', v); boot(); },
+  });
+  let charges = JSON.parse(JSON.stringify(s.charges));
+  const paintChg = () => {
+    $('#chg').innerHTML = charges.map((c, i) => `<div class="row wrap" style="margin-bottom:8px" data-ci="${i}"><input data-k="name" value="${esc(c.name)}" style="flex:2;min-width:110px" aria-label="Charge name"><input data-k="value" type="number" step="0.01" value="${c.value}" style="width:90px" aria-label="Value">
+      <select data-k="type" style="width:90px" aria-label="Type"><option value="percent" ${c.type === 'percent' ? 'selected' : ''}>%</option><option value="fixed" ${c.type === 'fixed' ? 'selected' : ''}>RM</option></select>
+      <label class="chk"><input type="checkbox" data-k="active" ${c.active ? 'checked' : ''}> On</label><button class="sm danger" data-dc="${i}">×</button></div>`).join('') || '<span class="mute small">No additional charges.</span>';
+  };
+  paintChg();
+  $('#chg').oninput = $('#chg').onchange = (e) => { const r = e.target.closest('[data-ci]'); if (!r) return; const c = charges[Number(r.dataset.ci)], k = e.target.dataset.k; c[k] = k === 'active' ? e.target.checked : e.target.value; };
+  $('#chg').onclick = (e) => { const d = e.target.closest('[data-dc]'); if (d) { charges.splice(Number(d.dataset.dc), 1); paintChg(); } };
+  $('#ac').onclick = () => { charges.push({ name: 'SST', type: 'percent', value: 6, active: true }); paintChg(); };
+  $('#ss').onclick = () => act(() => api.put('/settings', { charges, pointsPerRM: $('#pp').value, holdMinutes: $('#hm').value, reminderHour: $('#rh').value, reminderWhatsapp: $('#rw').checked, reminderEmail: $('#re').checked }), 'Settings saved');
+  $('#cpw').onclick = () => act(async () => { await api.put('/password', { current: $('#pw0').value, next: $('#pw1').value }); $('#pw0').value = $('#pw1').value = ''; }, 'Password changed');
+}
+boot();
+</script>
+</body>
+</html>

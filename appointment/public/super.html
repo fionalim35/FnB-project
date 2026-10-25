@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Super admin</title>
+<link rel="stylesheet" href="/common.css">
+<style>
+body{font-size:16px}
+button,.btn,input,select{min-height:48px}
+button.sm{min-height:40px;padding:6px 14px}
+#root{max-width:1180px;margin:0 auto;padding:18px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:14px}
+.login{margin:14vh auto;max-width:400px}
+.scroll{overflow-x:auto}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="/common.js"></script>
+<script>
+'use strict';
+const TK = 'apt_super_token';
+const api = makeApi('/api/super', TK, () => { api.setToken(null); showLogin(); });
+const root = $('#root');
+let period = 'monthly';
+
+function showLogin() {
+  root.innerHTML = `<div class="login card stack"><h1>Super admin</h1><form id="lf" class="stack"><div><label class="f" for="p">Password</label><input id="p" type="password" autocomplete="current-password" required></div>
+    <p class="err" id="le" role="alert"></p><button style="width:100%">Log in</button></form></div>`;
+  $('#lf').onsubmit = async (e) => {
+    e.preventDefault();
+    try { const r = await api.post('/login', { password: $('#p').value }); api.setToken(r.token); load(); } catch (er) { $('#le').textContent = er.message; }
+  };
+}
+async function load() {
+  if (!api.hasToken()) return showLogin();
+  let s;
+  try { s = await api.get('/stats?period=' + period); } catch { return showLogin(); }
+  const p = s.platform, sm = s.summary;
+  const max = Math.max(1, ...s.businesses.map((b) => b.sales));
+  root.innerHTML = `<div class="row between wrap" style="margin-bottom:14px"><h1 style="margin:0">Platform overview</h1>
+    <div class="row wrap"><div class="seg">${['daily', 'weekly', 'monthly', 'yearly'].map((x) => `<button data-p="${x}" class="${period === x ? 'on' : ''}">${x[0].toUpperCase() + x.slice(1)}</button>`).join('')}</div><button id="onb">+ Onboard business</button><button class="line" id="chpw">Change password</button><button class="line" id="lo">Log out</button></div></div>
+  <div class="kpis" style="margin-bottom:14px">
+    <div class="card kpi"><div class="small mute">Active administrators</div><div class="v">${p.active}</div><div class="small mute">${p.inactive} inactive · ${p.total} total</div></div>
+    <div class="card kpi"><div class="small mute">Services listed (active businesses)</div><div class="v">${p.listedItems}</div></div>
+    <div class="card kpi"><div class="small mute">Total amount (${period})</div><div class="v">${rm(sm.revenue)}</div><div class="small mute">${sm.orders} paid orders</div></div>
+    <div class="card kpi"><div class="small mute">Appointments booked</div><div class="v">${sm.appointments}</div><div class="small mute">${s.live.upcoming} upcoming</div></div>
+    <div class="card kpi"><div class="small mute">Customers</div><div class="v">${s.live.customers}</div></div>
+  </div>
+  <div class="card" style="margin-bottom:14px"><h3>Sales across all businesses</h3>${barChart(s.series, 'revenue', rm)}</div>
+  <div class="grid2" style="margin-bottom:14px">
+    <div class="card"><h3>Sales by business (${period})</h3>${s.businesses.map((b) => `<div style="margin:10px 0"><div class="row between"><span>${esc(b.name)} ${b.active ? '' : '<span class="badge gray">inactive</span>'}</span><b>${rm(b.sales)}</b></div><div class="hbar"><i style="width:${(b.sales / max) * 100}%"></i></div></div>`).join('') || '<p class="mute">No businesses yet.</p>'}</div>
+    <div class="card"><h3>Top services across the platform</h3>${s.topItems.length ? s.topItems.slice(0, 8).map((t, i) => `<div class="row between" style="margin:8px 0"><span>${i + 1}. ${esc(t.name)}</span><span class="small mute">${t.count} booked · ${rm(t.revenue)}</span></div>`).join('') : '<p class="mute">No sales in this period yet.</p>'}</div>
+  </div>
+  <h2>Businesses (administrators)</h2>
+  <div class="card flush scroll"><table><thead><tr><th>Business</th><th>Admin login</th><th>Services</th><th>Customers</th><th>Upcoming</th><th>Sales (${period})</th><th>Access</th><th></th></tr></thead><tbody>${s.businesses.map((b) => `<tr>
+    <td><b>${esc(b.name)}</b><div class="small mute">${esc(b.industry)}</div></td><td>${esc(b.adminUser)}</td><td>${b.items} <span class="small mute">(${b.activeItems} active)</span></td><td>${b.customers}</td><td>${b.upcoming}</td><td><b>${rm(b.sales)}</b></td>
+    <td><label class="chk"><input type="checkbox" data-act="${b.id}" ${b.active ? 'checked' : ''}> ${b.active ? 'Active' : 'Off'}</label></td>
+    <td class="right"><button class="sm ghost" data-link="${b.id}">Customer link</button> <button class="sm line" data-pw="${b.id}">Reset password</button></td></tr>`).join('') || '<tr><td colspan="8" class="mute">No businesses yet — onboard your first one.</td></tr>'}</tbody></table></div>`;
+  $$('[data-p]').forEach((b) => b.onclick = () => { period = b.dataset.p; load(); });
+  $('#lo').onclick = () => { api.setToken(null); showLogin(); };
+  $('#onb').onclick = onboard;
+  $('#chpw').onclick = () => form('Change super admin password',[['current', 'Current password', 'password'], ['next', 'New password (min 8)', 'password']], async (v) => { await api.put('/password', v); toast('Password changed'); });
+  $$('[data-act]').forEach((c) => c.onchange = async () => {
+    try { await api.put('/businesses/' + c.dataset.act, { active: c.checked }); load(); } catch (e) { toast(e.message, 'bad'); c.checked = !c.checked; }
+  });
+  $$('[data-pw]').forEach((b) => b.onclick = () => form('Reset administrator password', [['adminPass', 'New password (min 6)', 'password']], async (v) => { await api.put('/businesses/' + b.dataset.pw, v); toast('Password reset'); }));
+  $$('[data-link]').forEach((b) => b.onclick = () => {
+    const biz = s.businesses.find((x) => x.id === b.dataset.link), url = location.origin + '/shop/' + biz.slug;
+    const m = openModal(`<h2>${esc(biz.name)} — customer link</h2><input readonly value="${esc(url)}" id="lk"><div id="qr" style="margin:12px 0"></div><div class="row"><button id="cp" class="grow">Copy link</button><a class="btn line grow" href="${esc(url)}" target="_blank" rel="noopener">Open ↗</a></div><button class="line" data-close style="width:100%;margin-top:8px">Close</button>`);
+    if (window.QRCode) new QRCode($('#qr', m.el), { text: url, width: 160, height: 160 });
+    $('#cp', m.el).onclick = () => { navigator.clipboard && navigator.clipboard.writeText(url); toast('Link copied'); };
+  });
+}
+function form(title, fields, onSave) {
+  const m = openModal(`<h2>${esc(title)}</h2><form id="fm">${fields.map(([k, l, t]) => `<label class="f" for="f_${k}">${esc(l)}</label><input id="f_${k}" type="${t || 'text'}" autocomplete="off">`).join('')}</form><p class="err" id="fe" role="alert"></p>
+    <div class="row" style="margin-top:12px"><button class="line grow" data-close>Cancel</button><button class="grow" id="fs">Save</button></div>`);
+  $('#fs', m.el).onclick = async () => {
+    const v = {}; fields.forEach(([k]) => { v[k] = $('#f_' + k, m.el).value; });
+    try { await onSave(v); m.close(); load(); } catch (e) { $('#fe', m.el).textContent = e.message; }
+  };
+}
+function onboard() {
+  const m = openModal(`<h2>Onboard a new business</h2><p class="small mute">Creates the administrator account and the customer booking link. The administrator then sets up categories, services, staff and time slots.</p>
+    <form id="fm"><label class="f" for="n">Business name</label><input id="n"><label class="f" for="i">Industry (e.g. Beauty, Pet grooming)</label><input id="i">
+    <label class="f" for="s">Customer link name</label><div class="row"><span class="mute small">${esc(location.origin)}/shop/</span><input id="s" placeholder="auto from business name"></div>
+    <label class="f" for="u">Administrator username</label><input id="u" autocomplete="off"><label class="f" for="pw">Initial password (min 6)</label><input id="pw" type="text" autocomplete="off"></form>
+    <p class="err" id="fe" role="alert"></p><div class="row" style="margin-top:12px"><button class="line grow" data-close>Cancel</button><button class="grow" id="fs">Create business</button></div>`);
+  $('#fs', m.el).onclick = async () => {
+    try {
+      const b = await api.post('/businesses', { name: $('#n', m.el).value, industry: $('#i', m.el).value, slug: $('#s', m.el).value, adminUser: $('#u', m.el).value, adminPass: $('#pw', m.el).value });
+      m.close(); toast('Business created: ' + b.name); load();
+    } catch (e) { $('#fe', m.el).textContent = e.message; }
+  };
+}
+load();
+</script>
+</body>
+</html>
