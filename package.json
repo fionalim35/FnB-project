@@ -7,7 +7,7 @@
     "start": "node server.js",
     "test": "node test/smoke.js",
     "start:appointment": "node appointment/server.js",
-    "test:appointment": "node appointment/test/smoke.js"
+    "test:appointment": "node appointment/test/smoke.js && node appointment/test/billplz.js"
   },
   "engines": {
     "node": ">=18"

@@ -54,7 +54,12 @@ nav.bottom .cnt{position:absolute;top:4px;left:55%;background:var(--bad);color:#
 <script src="/common.js"></script>
 <script>
 'use strict';
-const slug = location.pathname.split('/').filter(Boolean).pop();
+const parts = location.pathname.split('/').filter(Boolean);
+const slug = parts[1];
+if (parts[2] === 'return') { // back from the payment gateway: open the order's result page
+  const oid = new URLSearchParams(location.search).get('order');
+  history.replaceState(null, '', '/shop/' + slug + (oid ? '#/done/' + encodeURIComponent(oid) : ''));
+}
 const TK = 'apt_token_' + slug, CK = 'apt_cart_' + slug;
 const api = makeApi('/api/shop/' + slug, TK, () => { api.setToken(null); S.me = null; render(); });
 const app = $('#app');
@@ -336,9 +341,9 @@ async function renderPay(id) {
     ${o.discount ? `<div class="row between small" style="color:var(--ok)"><span>Voucher ${esc(o.voucherCode)}</span><span>− ${rm(o.discount)}</span></div>` : ''}
     ${o.charges.map((c) => `<div class="row between small"><span>${esc(c.name)}</span><span>${rm(c.amount)}</span></div>`).join('')}
     <div class="row between b" style="font-size:1.2rem"><span>Total to pay</span><span>${rm(o.total)}</span></div></div>
-  <div class="card"><h3>Payment method</h3>
-    ${Object.entries(PAY).map(([k, v], i) => `<label class="opt"><input type="radio" name="pm" value="${k}" ${i ? '' : 'checked'}><span class="grow">${v}</span></label>`).join('')}
-    <p class="small mute">Demo payment gateway: no real money is charged. The business connects its live gateway (e.g. Billplz / Stripe) before go-live.</p></div>
+  ${S.biz.payMode === 'billplz' ? `<div class="card"><h3>Payment</h3><p class="small mute" style="margin:0">You will be taken to our secure payment partner (Billplz) to pay with online banking (FPX) or card, then brought back here.</p></div>` : `<div class="card"><h3>Payment method</h3>
+    ${['card', 'fpx', 'ewallet'].map((k, i) => `<label class="opt"><input type="radio" name="pm" value="${k}" ${i ? '' : 'checked'}><span class="grow">${PAY[k]}</span></label>`).join('')}
+    <p class="small mute">Demo payment gateway: no real money is charged.</p></div>`}
   <button id="pay" style="width:100%;min-height:50px">Pay ${rm(o.total)}</button><p class="err center" id="pe" role="alert"></p></div>`;
   const tick = () => {
     const s = Math.max(0, Math.round((o.holdUntil - Date.now()) / 1000));
@@ -349,14 +354,25 @@ async function renderPay(id) {
   tick(); payTimer = setInterval(tick, 1000);
   $('#pay').onclick = async () => {
     $('#pay').disabled = true; $('#pay').textContent = 'Processing…';
-    try { await api.post(`/orders/${id}/pay`, { method: $('input[name=pm]:checked').value }); clearInterval(payTimer); await loadMe(); location.hash = '#/done/' + id; }
+    try {
+      const r = await api.post(`/orders/${id}/pay`, { method: ($('input[name=pm]:checked') || {}).value });
+      clearInterval(payTimer);
+      if (r.redirectUrl) { location.href = r.redirectUrl; return; }
+      await loadMe(); location.hash = '#/done/' + id;
+    }
     catch (e) { $('#pe').textContent = e.message; $('#pay').disabled = false; $('#pay').textContent = 'Try again'; }
   };
 }
 async function renderDone(id) {
   clearInterval(payTimer);
   let o; try { o = await api.get('/orders/' + id); } catch (e) { app.innerHTML = head() + `<div class="card err">${esc(e.message)}</div>`; return; }
+  if (o.status === 'pending_payment' && S.biz.payMode === 'billplz' && (S.wait = (S.wait || 0) + 1) <= 40) {
+    app.innerHTML = head() + `<div class="card center stack"><div class="tick" style="background:var(--warn-soft);color:var(--warn)">⏳</div><h2>Confirming your payment…</h2><p class="mute">This usually takes a few seconds. Please do not close this page.</p><a class="btn line" href="#/pay/${id}">Back to payment</a></div>`;
+    setTimeout(() => { if (location.hash === '#/done/' + id) renderDone(id); }, 3000); return;
+  }
+  S.wait = 0;
   if (o.status !== 'paid') { location.hash = '#/pay/' + id; return; }
+  if (o.refundNeeded) { app.innerHTML = head() + `<div class="card center stack"><h2>Payment received, slot unavailable</h2><p>Your payment arrived after the reserved time ran out and the slot was taken. Please contact ${esc(S.biz.name)} (${esc(S.biz.phone)}) quoting order ${esc(o.no)} for a refund or a new time.</p></div>`; return; }
   await loadMe();
   app.innerHTML = head() + `<div class="card center stack"><div class="tick">✓</div><h1>Booking confirmed</h1><div class="mute">Order ${esc(o.no)} · paid ${rm(o.total)} by ${esc(PAY[o.payment.method])}</div>
     <div class="card" style="background:var(--ok-soft);color:var(--ok)"><div style="font-size:2rem;font-weight:800">+${o.points} points</div><div>earned for the loyalty programme · balance <b>${S.me.points}</b> points</div></div>

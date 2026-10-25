@@ -71,4 +71,4 @@ const STATUS = {
   pending_payment: ['Awaiting payment', 'warn'], paid: ['Paid', 'ok'], expired: ['Expired', 'gray'],
 };
 const statusBadge = (s) => `<span class="badge ${(STATUS[s] || ['', ''])[1]}">${esc((STATUS[s] || [s])[0])}</span>`;
-const PAY = { card: 'Credit / debit card', fpx: 'Online banking (FPX)', ewallet: 'E-wallet' };
+const PAY = { billplz: 'Online banking / card (Billplz)', card: 'Credit / debit card', fpx: 'Online banking (FPX)', ewallet: 'E-wallet' };

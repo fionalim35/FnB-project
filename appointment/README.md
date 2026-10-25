@@ -41,11 +41,13 @@ orders expire and release the slot. Two items in one cart cannot rely on the sam
 
 | Item | Status in this build | To go live |
 |---|---|---|
-| Payment | **Demo gateway** (no money moves) in `POST /api/shop/:slug/orders/:id/pay` | Integrate a gateway (e.g. Billplz, Stripe, iPay88) and call `confirmPayment()` from its verified webhook |
+| Payment | **Billplz** (FPX + cards) is built in; without keys it falls back to a **demo gateway** (no money moves) | Set `BILLPLZ_API_KEY`, `BILLPLZ_COLLECTION_ID`, `BILLPLZ_XSIGNATURE_KEY` (and `BILLPLZ_SANDBOX=1` while testing) plus `PUBLIC_URL` (must be public HTTPS so Billplz can call `/api/payments/billplz/callback`). Test in the Billplz sandbox before real money |
 | WhatsApp reminder | Simulated, logged in *Reminders log* | Set `WHATSAPP_TOKEN` + `WHATSAPP_PHONE_ID` (Meta WhatsApp Cloud API). Business-initiated messages need an approved template: set `WHATSAPP_TEMPLATE` (body params: name, service, date, time, business) |
 | Email reminder | Simulated | Set `RESEND_API_KEY` + `EMAIL_FROM` (Resend) |
 | Public URL | localhost | Run behind HTTPS; set `PUBLIC_URL` |
 | Customer login | Name + phone + email (as specified; no OTP) | Add SMS/WhatsApp OTP if you need stronger identity checks |
+
+Payment safety: a payment is only accepted when the callback signature is valid and the amount equals the order total. If a customer pays after the slot hold expired, the slot is re-booked when still free; otherwise the order is flagged **Refund needed** on the administrator dashboard (refund in Billplz).
 
 Other env vars: `PORT` (3100), `DATA_DIR`, `TZ` (default `Asia/Kuala_Lumpur`), `DEFAULT_COUNTRY_CODE` (60), `SHOW_BUSINESS_LIST=0` (hide business list on `/`).
 Reminders run from a 1-minute timer inside the server, so run **one instance** and back up the `data/` folder.

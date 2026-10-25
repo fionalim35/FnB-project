@@ -26,8 +26,13 @@ const CFG = {
   waLang: process.env.WHATSAPP_TEMPLATE_LANG || 'en',
   resendKey: process.env.RESEND_API_KEY || '',
   emailFrom: process.env.EMAIL_FROM || '',
+  bpKey: process.env.BILLPLZ_API_KEY || '',
+  bpCollection: process.env.BILLPLZ_COLLECTION_ID || '',
+  bpSignKey: process.env.BILLPLZ_XSIGNATURE_KEY || '',
+  bpSandbox: process.env.BILLPLZ_SANDBOX === '1',
 };
 fs.mkdirSync(UP_DIR, { recursive: true });
+const billplzLive = () => !!(CFG.bpKey && CFG.bpCollection && CFG.bpSignKey && CFG.publicUrl);
 
 // ---------------------------------------------------------------- helpers
 const uid = () => crypto.randomBytes(6).toString('hex');
@@ -435,8 +440,32 @@ function createOrder(biz, cust, rawLines) {
   db.orders.push(o); save();
   return o;
 }
+// A customer can pay on the gateway after our slot hold lapsed. Try to put the slots back; if somebody else took them, keep the
+// money flagged for refund instead of double-booking.
+function reinstate(o) {
+  const biz = bizById(o.bizId);
+  const appts = db.appts.filter((a) => a.orderId === o.id);
+  const busyByDate = new Map(), plan = [];
+  for (const a of appts) {
+    const info = dayInfo(biz, a.date), it = itemById(a.itemId);
+    if (!info || !it) return false;
+    if (!busyByDate.has(a.date)) busyByDate.set(a.date, busyMap(biz.id, a.date));
+    const busy = busyByDate.get(a.date);
+    const st = pickStaff(biz, it, a.date, a.startMin, a.endMin, busy, info);
+    if (!st) return false;
+    book(busy, st.id, a.startMin, a.endMin); plan.push([a, st.id]);
+  }
+  for (const [a, staffId] of plan) { a.staffId = staffId; a.status = 'hold'; a.holdUntil = Date.now() + 60000; }
+  return true;
+}
 function confirmPayment(o, method, ref) {
+  if (o.status === 'paid') return;
   const biz = bizById(o.bizId), cust = custById(o.customerId);
+  const late = o.status !== 'pending_payment';
+  if (late && !reinstate(o)) {
+    o.status = 'paid'; o.needsRefund = true; o.payment = { method, ref, paidAt: Date.now() };
+    save(); return; // appointments stay cancelled; the administrator sees a refund warning on the dashboard
+  }
   o.status = 'paid';
   o.payment = { method, ref, paidAt: Date.now() };
   cust.points = (cust.points || 0) + o.points;
@@ -446,6 +475,35 @@ function confirmPayment(o, method, ref) {
   for (const a of db.appts.filter((x) => x.orderId === o.id)) {
     notify(biz, cust, a, 'confirm').catch((e) => console.error('notify failed', e.message));
   }
+}
+
+// ---------------------------------------------------------------- Billplz (FPX / cards) gateway
+const bpBase = () => (CFG.bpSandbox ? 'https://www.billplz-sandbox.com' : 'https://www.billplz.com');
+function bpSignature(params) {
+  const src = Object.keys(params).filter((k) => k !== 'x_signature').sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase())).map((k) => k + params[k]).join('|');
+  return crypto.createHmac('sha256', CFG.bpSignKey).update(src).digest('hex');
+}
+async function createBill(biz, cust, o) {
+  const form = new URLSearchParams({
+    collection_id: CFG.bpCollection, email: cust.email, mobile: phoneIntl(cust.phone), name: cust.name, amount: String(Math.round(o.total * 100)),
+    description: `${biz.name} booking ${o.no}`.slice(0, 200), callback_url: `${CFG.publicUrl}/api/payments/billplz/callback`,
+    redirect_url: `${CFG.publicUrl}/shop/${biz.slug}/return?order=${o.id}`, reference_1_label: 'Order', reference_1: o.no,
+  });
+  const r = await fetch(`${bpBase()}/api/v3/bills`, { method: 'POST', headers: { Authorization: 'Basic ' + Buffer.from(CFG.bpKey + ':').toString('base64') }, body: form });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || !d.id || !d.url) throw new HttpError(502, 'Payment gateway is unavailable right now. Please try again in a moment.');
+  return { provider: 'billplz', billId: d.id, url: d.url };
+}
+function billplzCallback(params) {
+  if (!billplzLive()) throw new HttpError(503, 'Billplz is not configured');
+  const given = Buffer.from(String(params.x_signature || '')), want = Buffer.from(bpSignature(params));
+  if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) throw new HttpError(401, 'Bad signature');
+  const o = db.orders.find((x) => x.gateway && x.gateway.billId === params.id);
+  if (!o) throw new HttpError(404, 'Unknown bill');
+  if (o.status === 'paid' || params.paid !== 'true') return { ok: true };
+  if (Number(params.paid_amount) !== Math.round(o.total * 100)) throw bad('Amount mismatch');
+  confirmPayment(o, 'billplz', params.id);
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------- notifications (WhatsApp + email)
@@ -570,7 +628,7 @@ function stats(bizIds, period) {
       activeItems: items.filter((i) => i.categoryId && i.active).length, topPicks: items.filter((i) => i.topPick || i.recommended).length,
       categories: db.categories.filter((c) => set.has(c.bizId)).map((c) => ({ name: c.name, active: c.active, items: items.filter((i) => i.categoryId === c.id).length })),
     },
-    live: { upcoming: upcoming.length, today: upcoming.filter((a) => a.date === t0).length, customers: db.customers.filter((c) => set.has(c.bizId)).length },
+    live: { refunds: db.orders.filter((o) => o.needsRefund && set.has(o.bizId)).map((o) => ({ no: o.no, total: o.total, ref: o.payment.ref })), upcoming: upcoming.length, today: upcoming.filter((a) => a.date === t0).length, customers: db.customers.filter((c) => set.has(c.bizId)).length },
   };
 }
 function demoSales(biz) {
@@ -735,7 +793,7 @@ function apptView(a, forCustomer) {
 }
 function orderView(o) {
   return {
-    id: o.id, no: o.no, status: o.status, subtotal: o.subtotal, discount: o.discount, voucherCode: o.voucherCode, charges: o.charges, total: o.total, points: o.points,
+    id: o.id, no: o.no, status: o.status, refundNeeded: !!o.needsRefund, subtotal: o.subtotal, discount: o.discount, voucherCode: o.voucherCode, charges: o.charges, total: o.total, points: o.points,
     holdUntil: o.holdUntil, payment: o.payment, createdAt: o.createdAt, appts: db.appts.filter((a) => a.orderId === o.id).map((a) => apptView(a, true)),
   };
 }
@@ -998,7 +1056,7 @@ route('GET', '/api/shop/:slug', null, ({ params }) => {
   return {
     name: b.name, industry: b.industry, about: b.about, photo: b.photo, phone: b.phone, address: b.address, categories: cats,
     areas: db.areas.filter((a) => a.bizId === b.id && a.active).map((a) => ({ id: a.id, type: a.type, name: a.name, address: a.address, fee: a.fee })),
-    reminderNote: b.settings.reminderWhatsapp || b.settings.reminderEmail, holdMinutes: b.settings.holdMinutes,
+    reminderNote: b.settings.reminderWhatsapp || b.settings.reminderEmail, holdMinutes: b.settings.holdMinutes, payMode: billplzLive() ? 'billplz' : 'demo',
   };
 });
 route('POST', '/api/shop/:slug/login', null, ({ params, body }) => {
@@ -1105,15 +1163,22 @@ route('GET', '/api/shop/:slug/orders/:id', 'customer', (ctx) => {
   if (!o || o.customerId !== cust.id) throw new HttpError(404, 'Order not found');
   return orderView(o);
 });
-route('POST', '/api/shop/:slug/orders/:id/pay', 'customer', (ctx) => {
-  const { cust } = shopCust(ctx); sweep();
+route('POST', '/api/shop/:slug/orders/:id/pay', 'customer', async (ctx) => {
+  const { biz, cust } = shopCust(ctx); sweep();
   const o = orderById(ctx.params.id);
   if (!o || o.customerId !== cust.id) throw new HttpError(404, 'Order not found');
   if (o.status === 'paid') return orderView(o);
   if (o.status !== 'pending_payment') throw new HttpError(409, 'Your reservation has expired. Please place the order again.');
+  if (billplzLive()) {
+    if (!o.gateway) { o.gateway = await createBill(biz, cust, o); }
+    o.holdUntil = Math.max(o.holdUntil, Date.now() + 30 * 60000); // keep the slot while the customer is on the bank page
+    for (const a of db.appts) if (a.orderId === o.id && a.status === 'hold') a.holdUntil = o.holdUntil;
+    save();
+    return { ...orderView(o), redirectUrl: `${o.gateway.url}` };
+  }
   const method = str(ctx.body.method, 20);
   if (!['card', 'fpx', 'ewallet'].includes(method)) throw bad('Please choose a payment method');
-  // DEMO GATEWAY: replace this block with a real gateway (Billplz/Stripe/...) and call confirmPayment() from its verified webhook.
+  // DEMO GATEWAY (no BILLPLZ_* settings): confirms immediately, no real money moves.
   confirmPayment(o, method, `PAY-${crypto.randomBytes(5).toString('hex').toUpperCase()}`);
   return orderView(o);
 });
@@ -1175,6 +1240,10 @@ async function handle(req, res) {
     fs.writeFileSync(path.join(UP_DIR, name), buf);
     return sendJson(res, 200, { url: `/uploads/${name}` });
   }
+  if (p === '/api/payments/billplz/callback' && req.method === 'POST') {
+    const raw = (await readBody(req, 64 * 1024)).toString('utf8');
+    return sendJson(res, 200, billplzCallback(Object.fromEntries(new URLSearchParams(raw))));
+  }
   if (p.startsWith('/api/')) {
     for (const r of routes) {
       if (r.method !== req.method) continue;
@@ -1197,7 +1266,7 @@ async function handle(req, res) {
   }
   if (req.method !== 'GET' && req.method !== 'HEAD') throw new HttpError(405, 'Method not allowed');
   if (PAGES[p]) return sendFile(res, path.join(PUBLIC_DIR, PAGES[p]));
-  if (/^\/shop\/[\w-]+$/.test(p)) return sendFile(res, path.join(PUBLIC_DIR, 'customer.html'));
+  if (/^\/shop\/[\w-]+(\/return)?$/.test(p)) return sendFile(res, path.join(PUBLIC_DIR, 'customer.html'));
   if (p.startsWith('/uploads/')) return sendFile(res, path.join(UP_DIR, path.basename(p)), 'public, max-age=31536000, immutable');
   const f = path.normalize(path.join(PUBLIC_DIR, p));
   if (!f.startsWith(PUBLIC_DIR + path.sep) || path.extname(f) === '.html') { res.writeHead(404); return res.end('Not found'); }
@@ -1224,7 +1293,8 @@ if (require.main === module) {
     console.log(`  Super admin : ${base}/super   (password from SUPER_PASSWORD, default super123)`);
     console.log(`  Administrator: ${base}/admin  (demo: glow / admin123, paws / admin123)`);
     for (const b of db.businesses) console.log(`  Customer link: ${base}/shop/${b.slug}   (${b.name})`);
+    console.log(`  Payment: ${billplzLive() ? 'Billplz LIVE' : 'DEMO gateway (set BILLPLZ_* + PUBLIC_URL to go live)'}`);
     console.log(`  Reminders: WhatsApp ${CFG.waToken ? 'LIVE' : 'simulated'}, Email ${CFG.resendKey ? 'LIVE' : 'simulated'}`);
   });
 }
-module.exports = { server, reminderTick, getDb: () => db };
+module.exports = { server, reminderTick, getDb: () => db, bpSignature };

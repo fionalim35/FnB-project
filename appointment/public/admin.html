@@ -133,6 +133,7 @@ async function vDash() {
   const p = s.summary;
   main().innerHTML = `<div class="row between wrap" style="margin-bottom:14px"><h1 style="margin:0">Dashboard</h1>
     <div class="seg">${['daily', 'weekly', 'monthly', 'yearly'].map((x) => `<button data-p="${x}" class="${C.period === x ? 'on' : ''}">${x[0].toUpperCase() + x.slice(1)}</button>`).join('')}</div></div>
+  ${s.live.refunds.length ? `<div class="card" style="background:var(--bad-soft);color:var(--bad);margin-bottom:14px"><b>⚠ Refund needed:</b> these customers paid after their slot hold expired and the time was taken. Refund in Billplz or rebook them: ${s.live.refunds.map((r) => `${esc(r.no)} (${rm(r.total)}, ref ${esc(r.ref)})`).join(', ')}</div>` : ''}
   <div class="kpis" style="margin-bottom:14px">
     <div class="card kpi"><div class="small mute">Sales (${C.period})</div><div class="v">${rm(p.revenue)}</div></div>
     <div class="card kpi"><div class="small mute">Paid orders</div><div class="v">${p.orders}</div></div>
