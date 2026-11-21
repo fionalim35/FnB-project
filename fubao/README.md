@@ -5,7 +5,7 @@ Zero dependencies – only Node.js 18+ is needed. Data lives in `data/db.json` (
 ```bash
 cd fubao
 npm start        # http://localhost:3000   (PORT=8080 npm start to change)
-npm run demo     # same, plus a demo customer (0123456789 / demo1234), a voucher and a flash sale
+npm run demo     # (works on Windows/Mac) same, plus a demo customer (0123456789 / demo1234), a voucher and a flash sale
 npm test         # 20 end-to-end checks (incl. a fake email server)
 ```
 

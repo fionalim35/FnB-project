@@ -163,7 +163,7 @@ function load() {
   db.counters = db.counters || { order: 0, booking: 0 };
   const t = Date.now();
   for (const k of Object.keys(db.sessions)) if (db.sessions[k].exp < t) delete db.sessions[k];
-  if (process.env.DEMO) { seedDemo(db); saveNow(); }
+  if (process.env.DEMO || process.argv.includes('--demo')) { seedDemo(db); saveNow(); }
   return db;
 }
 function saveNow() {
