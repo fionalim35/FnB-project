@@ -390,7 +390,7 @@
   async function pageProfile() {
     const u = S.my.user, st = S.pub.studio;
     $app.innerHTML = `<h1 style="margin-bottom:12px">My profile</h1>
-      <form class="card" id="pf"><div class="field"><label class="f">Name</label><input type="text" name="name" value="${esc(u.name)}" required></div><div class="field"><label class="f">Contact number</label><input type="tel" name="phone" value="${esc(u.phone)}" required></div><div class="field"><label class="f">Email (optional)</label><input type="email" name="email" value="${esc(u.email)}"></div>
+      <form class="card" id="pf"><div class="field"><label class="f">Name</label><input type="text" name="name" value="${esc(u.name)}" required></div><div class="field"><label class="f">Contact number</label><input type="tel" name="phone" value="${esc(u.phone)}" required></div><div class="field"><label class="f">Email (for password reset & booking updates)</label><input type="email" name="email" value="${esc(u.email)}"></div><div class="field"><label class="f">Birthday (optional - for birthday treats)</label><input type="date" name="birthday" value="${esc(u.birthday)}"></div>
         <div class="field"><label class="f">Default home address (optional)</label><textarea name="address">${esc(u.address)}</textarea></div><div class="field"><label class="f">Area</label><select name="area"><option value="">-</option>${st.homeAreas.map((a) => `<option ${u.area === a ? 'selected' : ''}>${esc(a)}</option>`).join('')}</select></div><button class="btn block">Save changes</button></form>
       <form class="card sec" id="pw"><h3>Change password</h3><div class="field" style="margin-top:8px"><label class="f">Current password</label><input type="password" name="current" required></div><div class="field"><label class="f">New password (min 6 characters)</label><input type="password" name="password" minlength="6" required></div><button class="btn ghost block">Update password</button></form>
       <button class="btn danger block sec" data-act="logout">Log out</button><p class="tiny muted center" style="margin-top:14px">${esc(st.name)} · ${esc(st.phone)}</p>`;
@@ -404,10 +404,10 @@
   async function pageLogin() {
     $app.innerHTML = `<div class="auth"><div class="center" style="margin:10px 0 18px"><h1>Welcome</h1><p class="muted">Log in to view your packages, book and earn rewards</p></div>
       <div class="seg"><button class="${authTab === 'login' ? 'on' : ''}" data-act="authTab" data-v="login">Log in</button><button class="${authTab === 'register' ? 'on' : ''}" data-act="authTab" data-v="register">Register</button></div>
-      <form class="card" id="af" style="margin-top:14px">${authTab === 'register' ? '<div class="field"><label class="f">Full name</label><input type="text" name="name" required autocomplete="name"></div><div class="field"><label class="f">Contact number</label><input type="tel" name="phone" required autocomplete="tel" placeholder="e.g. 012-345 6789"></div><div class="field"><label class="f">Email (optional)</label><input type="email" name="email" autocomplete="email"></div>'
+      <form class="card" id="af" style="margin-top:14px">${authTab === 'register' ? '<div class="field"><label class="f">Full name</label><input type="text" name="name" required autocomplete="name"></div><div class="field"><label class="f">Contact number</label><input type="tel" name="phone" required autocomplete="tel" placeholder="e.g. 012-345 6789"></div><div class="field"><label class="f">Email</label><input type="email" name="email" required autocomplete="email"><div class="hint">Used to reset your password and send booking updates.</div></div><div class="field"><label class="f">Friend\'s contact number who invited you (optional)</label><input type="tel" name="referral" placeholder="Referral"></div>'
         : '<div class="field"><label class="f">Contact number or email</label><input type="text" name="identifier" required autocomplete="username"></div>'}
         <div class="field"><label class="f">Password</label><input type="password" name="password" required minlength="6" autocomplete="${authTab === 'login' ? 'current-password' : 'new-password'}"></div>
-        <button class="btn block">${authTab === 'login' ? 'Log in' : 'Create my account'}</button>${authTab === 'login' ? '<p class="tiny muted center" style="margin-top:10px">Forgot your password? Please contact us and we will reset it.</p>' : ''}</form></div>`;
+        <button class="btn block">${authTab === 'login' ? 'Log in' : 'Create my account'}</button>${authTab === 'login' ? '<p class="center" style="margin-top:10px"><button type="button" class="link small" data-act="forgot">Forgot password?</button></p>' : ''}</form></div>`;
     document.getElementById('af').onsubmit = async (e) => {
       e.preventDefault(); const btn = e.target.querySelector('button'); btn.disabled = true;
       try {
@@ -418,6 +418,7 @@
       } catch (x) { btn.disabled = false; FB.err(x); }
     };
   }
+  A.forgot = () => FB.forgotView($app.querySelector('.auth'), () => pageLogin());
   A.authTab = (el) => { authTab = el.dataset.v; pageLogin(); };
 
   route();

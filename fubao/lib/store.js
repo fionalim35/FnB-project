@@ -20,12 +20,8 @@ function weekly(open = '10:00', close = '19:00', days = [1, 2, 3, 4, 5, 6]) {
   return w;
 }
 
-function seed() {
-  const now = Date.now();
-  const d = {
-    meta: { version: 1, createdAt: now },
-    counters: { order: 0, booking: 0 },
-    settings: {
+function defaultSettings() {
+  return {
       studioName: 'Fubao Beauty Centre',
       phone: '018-2530288',
       whatsapp: '60182530288',
@@ -46,7 +42,18 @@ function seed() {
       pointsEarnPerRM: 100,
       pointValueRM: 1,
       gamePoints: 0.01,
-    },
+      emailEnabled: false,
+      ownerNotifyEmail: '',
+      smtp: { host: 'smtp.gmail.com', port: 465, user: '', pass: '', fromName: 'Fubao Beauty Centre', fromEmail: '' },
+  };
+}
+
+function seed() {
+  const now = Date.now();
+  const d = {
+    meta: { version: 1, createdAt: now },
+    counters: { order: 0, booking: 0 },
+    settings: defaultSettings(),
     users: [],
     sessions: {},
     services: [],
@@ -149,6 +156,10 @@ function load() {
   }
   for (const k of ['users', 'services', 'packages', 'flashes', 'vouchers', 'orders', 'entitlements', 'payments', 'bookings', 'points', 'games']) db[k] = db[k] || [];
   db.sessions = db.sessions || {};
+  db.resets = db.resets || {};
+  db.mailLog = db.mailLog || [];
+  const def = defaultSettings();
+  for (const k of Object.keys(def)) if (!(k in db.settings)) db.settings[k] = def[k];
   db.counters = db.counters || { order: 0, booking: 0 };
   const t = Date.now();
   for (const k of Object.keys(db.sessions)) if (db.sessions[k].exp < t) delete db.sessions[k];
@@ -156,6 +167,7 @@ function load() {
   return db;
 }
 function saveNow() {
+  if (!fs.existsSync(DATA_DIR)) return;
   clearTimeout(timer);
   if (!db) return;
   const tmp = DB_FILE + '.tmp';

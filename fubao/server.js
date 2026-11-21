@@ -12,8 +12,13 @@ const S = require('./lib/store');
 S.load();
 const U = require('./lib/util');
 const L = require('./lib/logic');
+const mail = require('./lib/mail');
 const { uid, round2, bad, str, num, nowMY, addDays, toMin, isDate, isTime, isDateTime, HttpError } = U;
 const d = () => S.d();
+// email helpers (fire-and-forget; skipped quietly when email is not set up)
+const emailOwner = (subject, text) => { const to = d().settings.ownerNotifyEmail; if (to) mail.send(to, subject, text); };
+const emailUser = (u, subject, text) => { if (u && u.email) mail.send(u.email, subject, text); };
+const bkLine = (b) => `${b.serviceName}\n${b.date} at ${b.start}-${b.end} (${b.mode === 'home' ? 'home service' : 'at the studio'})\nBooking no: ${b.no}`;
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -88,12 +93,16 @@ route('POST', '/api/auth/register', null, mutates(({ body, ip }) => {
   const name = str(body.name, 80), phone = U.normPhone(body.phone), email = U.normEmail(body.email), pw = String(body.password || '');
   if (!name) throw bad('Please enter your name');
   if (phone.length < 9 || phone.length > 12) throw bad('Please enter a valid contact number');
-  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw bad('Please enter a valid email');
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw bad('Please enter a valid email (used to reset your password)');
   if (pw.length < 6) throw bad('Password must be at least 6 characters');
   if (d().users.some((u) => u.phone === phone)) throw bad('This contact number is already registered. Please log in.');
   if (email && d().users.some((u) => u.email === email)) throw bad('This email is already registered. Please log in.');
-  const u = { id: uid(), role: 'customer', name, phone, email, passHash: U.hashPassword(pw), active: true, createdAt: Date.now(), address: '', area: '' };
+  const refPhone = U.normPhone(body.referral);
+  const ref = refPhone ? d().users.find((x) => x.role === 'customer' && x.phone === refPhone) : null;
+  const u = { id: uid(), role: 'customer', name, phone, email, passHash: U.hashPassword(pw), active: true, createdAt: Date.now(), address: '', area: '', birthday: '', referredBy: ref ? ref.id : '', rewards: [] };
   d().users.push(u);
+  emailUser(u, 'Welcome to ' + d().settings.studioName, `Hi ${name},\n\nYour account is ready. Log in any time to view our services, buy packages and book your appointments.`);
+  emailOwner('New customer registered', `${name} (${phone}) just created an account.${ref ? '\nReferred by ' + ref.name + ' (' + ref.phone + ').' : ''}`);
   return { token: newSession(u), user: L.pubUser(u) };
 }));
 route('POST', '/api/auth/login', null, mutates(({ body, ip }) => {
@@ -103,6 +112,34 @@ route('POST', '/api/auth/login', null, mutates(({ body, ip }) => {
   const u = d().users.find((x) => (phone.length >= 9 && x.phone === phone) || (email && x.email && x.email === email));
   if (!u || u.active === false || !U.checkPassword(body.password, u.passHash)) throw new HttpError(401, 'Incorrect contact number / email or password');
   return { token: newSession(u), user: L.pubUser(u) };
+}));
+const resetHash = (code, id) => crypto.createHash('sha256').update(code + ':' + id).digest('hex');
+const findLogin = (idv) => { const phone = U.normPhone(idv), email = U.normEmail(idv); return d().users.find((x) => x.active !== false && ((phone.length >= 9 && x.phone === phone) || (email && x.email && x.email === email))); };
+route('POST', '/api/auth/forgot', null, mutates(({ body, ip }) => {
+  const id = str(body.identifier, 120);
+  throttle('forgot:' + ip);
+  if (!id) throw bad('Please enter your contact number or email');
+  const u = findLogin(id);
+  if (u && u.email) {
+    const code = String(crypto.randomInt(100000, 1000000));
+    d().resets[u.id] = { hash: resetHash(code, u.id), exp: Date.now() + 15 * 60e3, tries: 0 };
+    mail.send(u.email, 'Your password reset code', `Hi ${u.name},\n\nYour password reset code is: ${code}\n\nIt is valid for 15 minutes. If you did not ask for this, you can ignore this email.`);
+  }
+  return { ok: true, message: 'If this account has an email address, a 6-digit code has been sent to it. It is valid for 15 minutes. No email on your account? Please contact the studio.' };
+}));
+route('POST', '/api/auth/reset', null, mutates(({ body, ip }) => {
+  const id = str(body.identifier, 120), code = str(body.code, 10), pw = String(body.password || '');
+  throttle('reset:' + ip);
+  const u = findLogin(id), rec = u && d().resets[u.id];
+  if (!u || !rec || rec.exp < Date.now() || rec.tries >= 5) throw bad('That code is invalid or has expired. Please request a new one.');
+  rec.tries++;
+  const a = Buffer.from(resetHash(code, u.id)), b = Buffer.from(rec.hash);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw bad('Incorrect code. Please check your email and try again.');
+  if (pw.length < 6) throw bad('Password must be at least 6 characters');
+  u.passHash = U.hashPassword(pw);
+  delete d().resets[u.id];
+  for (const t of Object.keys(d().sessions)) if (d().sessions[t].userId === u.id) delete d().sessions[t];
+  return { ok: true };
 }));
 route('POST', '/api/auth/logout', ANY, mutates(({ token }) => { delete d().sessions[token]; return { ok: true }; }));
 route('GET', '/api/me', ANY, ({ user }) => ({ user: L.pubUser(user) }));
@@ -114,7 +151,7 @@ route('PUT', '/api/me', ANY, mutates(({ user, body }) => {
   if (d().users.some((u) => u.id !== user.id && u.phone === phone)) throw bad('That contact number is used by another account');
   if (email && d().users.some((u) => u.id !== user.id && u.email === email)) throw bad('That email is used by another account');
   Object.assign(user, { name, phone, email });
-  if (user.role === 'customer') { user.address = str(body.address, 300); user.area = str(body.area, 80); }
+  if (user.role === 'customer') { user.address = str(body.address, 300); user.area = str(body.area, 80); if (body.birthday === '' || isDate(body.birthday)) user.birthday = body.birthday || ''; }
   return { user: L.pubUser(user) };
 }));
 route('POST', '/api/me/password', ANY, mutates(({ user, body }) => {
@@ -158,6 +195,7 @@ route('GET', '/api/my', CUST, ({ user }) => {
     ledger: s.points.filter((p) => p.customerId === me).sort((a, b) => b.at - a.at).slice(0, 60),
     game: { playedToday: s.games.some((g) => g.customerId === me && g.date === today), points: s.settings.gamePoints, totalPlays: s.games.filter((g) => g.customerId === me).length },
     bank: s.settings.bank,
+    rewards: (user.rewards || []).slice().reverse(),
     isMember: s.orders.some((o) => o.customerId === me && o.status !== 'cancelled' && o.lines.some((l) => l.type === 'package')),
   };
 });
@@ -194,10 +232,13 @@ route('POST', '/api/payments', CUST, mutates(({ user, body }) => {
   const file = saveDataUrl(body.image, S.RECEIPTS);
   const p = { id: uid(), customerId: user.id, kind, refId: body.refId, amount, file, method: 'bank_in', note: str(body.note, 200), status: 'pending', createdAt: Date.now() };
   s.payments.push(p);
+  emailOwner('Payment receipt uploaded', `${user.name} uploaded a receipt of RM${amount.toFixed(2)} for ${kind === 'order' ? 'an order' : 'a home service fee'}. Please verify it in the portal (Orders & payments).`);
   return { payment: L.paymentView(p) };
 }));
 route('POST', '/api/bookings', CUST, mutates(({ user, body }) => {
   const b = L.makeBooking({ customer: user, entitlementId: body.entitlementId, mode: body.mode, date: body.date, start: body.start, beauticianId: body.beauticianId || null, contact: body.contact });
+  emailOwner('New booking request ' + b.no, `${user.name} (${b.contact.phone}) requested:\n${bkLine(b)}${b.mode === 'home' ? '\nAddress: ' + b.contact.address + ', ' + b.contact.area : ''}\n\nPlease approve it in the portal.`);
+  emailUser(user, 'We received your booking request', `Hi ${user.name},\n\nWe received your request:\n${bkLine(b)}\n\nWe will confirm it shortly.`);
   return { booking: L.bookingView(b) };
 }));
 route('POST', '/api/bookings/:id/cancel', CUST, mutates(({ user, params }) => {
@@ -209,6 +250,7 @@ route('POST', '/api/bookings/:id/cancel', CUST, mutates(({ user, params }) => {
     if (hrs < d().settings.cancelHours) throw bad(`Confirmed appointments can only be cancelled ${d().settings.cancelHours} hours or more before the start time. Please contact us.`);
   }
   b.status = 'cancelled'; b.log.push({ at: Date.now(), by: user.name, text: 'Cancelled by customer' });
+  emailOwner('Booking cancelled by customer ' + b.no, `${user.name} cancelled:\n${bkLine(b)}`);
   return { ok: true };
 }));
 route('POST', '/api/game/play', CUST, mutates(({ user }) => {
@@ -469,17 +511,23 @@ route('POST', '/api/admin/bookings/:id/action', OWNER, mutates(({ user, params, 
       b.status = 'no_show'; log('Marked as no-show (session not deducted)'); break;
     default: throw bad('Unknown action');
   }
+  const cu = d().users.find((x) => x.id === b.customerId);
+  const msg = { approve: ['Your booking is confirmed', 'Good news! Your booking is confirmed:'], reschedule: ['Your booking was updated', 'Your booking details were updated:'], reject: ['Your booking could not be accepted', 'Sorry, we could not accept this booking' + (b.reason ? ' (' + b.reason + ')' : '') + ':'], cancel: ['Your booking was cancelled', 'Your booking was cancelled' + (b.reason ? ' (' + b.reason + ')' : '') + ':'], complete: ['Thank you for visiting us', 'Your treatment is completed. Thank you!'] }[body.action];
+  if (msg) emailUser(cu, msg[0], `Hi ${cu ? cu.name : ''},\n\n${msg[1]}\n${bkLine(b)}`);
   return { booking: L.bookingView(b) };
 }));
 
 // ================= admin: customers =================
 function customerRow(u) {
   const ents = d().entitlements.filter((e) => e.customerId === u.id).map(L.entView);
-  return { ...L.pubUser(u), active: u.active !== false, createdAt: u.createdAt, points: L.pointsBalance(u.id), activePackages: ents.filter((e) => e.state === 'active').length, orders: d().orders.filter((o) => o.customerId === u.id && o.status !== 'cancelled').length };
+  const ref = u.referredBy && d().users.find((x) => x.id === u.referredBy);
+  const mm = (u.birthday || '').slice(5, 7);
+  return { ...L.pubUser(u), birthday: u.birthday || '', referredBy: u.referredBy || '', referredByName: ref ? ref.name : '', referrals: d().users.filter((x) => x.referredBy === u.id).length, birthdayThisMonth: !!mm && mm === nowMY().date.slice(5, 7), rewards: (u.rewards || []).slice().reverse(), active: u.active !== false, createdAt: u.createdAt, points: L.pointsBalance(u.id), activePackages: ents.filter((e) => e.state === 'active').length, orders: d().orders.filter((o) => o.customerId === u.id && o.status !== 'cancelled').length };
 }
 route('GET', '/api/admin/customers', OWNER, ({ query }) => {
   const q = str(query.q, 60).toLowerCase();
   let rows = d().users.filter((u) => u.role === 'customer');
+  if (query.birthday === 'month') rows = rows.filter((u) => u.birthday && u.birthday.slice(5, 7) === nowMY().date.slice(5, 7));
   if (q) rows = rows.filter((u) => u.name.toLowerCase().includes(q) || u.phone.includes(q.replace(/\D/g, '') || '@@') || (u.email || '').toLowerCase().includes(q));
   return { items: rows.sort((a, b) => b.createdAt - a.createdAt).map(customerRow) };
 });
@@ -516,7 +564,8 @@ route('PUT', '/api/admin/customers/:id', OWNER, mutates(({ params, body }) => {
   if (phone.length < 9) throw bad('Please enter a valid contact number');
   if (d().users.some((x) => x.id !== u.id && x.phone === phone)) throw bad('That contact number is used by another account');
   if (email && d().users.some((x) => x.id !== u.id && x.email === email)) throw bad('That email is used by another account');
-  Object.assign(u, { name, phone, email, address: str(body.address, 300), area: str(body.area, 80), active: bool(body.active) });
+  const referredBy = body.referredBy && body.referredBy !== u.id && d().users.some((x) => x.id === body.referredBy && x.role === 'customer') ? body.referredBy : '';
+  Object.assign(u, { name, phone, email, address: str(body.address, 300), area: str(body.area, 80), active: bool(body.active), birthday: body.birthday && isDate(body.birthday) ? body.birthday : '', referredBy });
   if (body.password) { if (String(body.password).length < 6) throw bad('Password must be at least 6 characters'); u.passHash = U.hashPassword(String(body.password)); }
   return { item: customerRow(u) };
 }));
@@ -528,6 +577,41 @@ route('POST', '/api/admin/customers/:id/points', OWNER, mutates(({ user, params,
   if (L.pointsBalance(u.id) + delta < -0.0001) throw bad('That would make the balance negative');
   L.addPoints(u.id, delta, 'adjust', str(body.note, 120) || `Adjusted by ${user.name}`);
   return { points: L.pointsBalance(u.id) };
+}));
+
+route('POST', '/api/admin/customers/:id/reward', OWNER, mutates(({ user, params, body }) => {
+  const u = d().users.find((x) => x.id === params.id && x.role === 'customer');
+  if (!u) throw new HttpError(404, 'Customer not found');
+  const reason = ['Birthday', 'Referral', 'Other'].includes(body.reason) ? body.reason : 'Other';
+  const kind = body.kind;
+  let title = str(body.title, 100);
+  if (kind === 'voucher') {
+    const type = body.type === 'percent' ? 'percent' : 'amount';
+    const value = money(body.value, 'Value'); if (!(value > 0)) throw bad('Voucher value must be more than 0');
+    if (type === 'percent' && value > 100) throw bad('Percentage cannot exceed 100');
+    const endDate = body.endDate ? (isDate(body.endDate) ? body.endDate : (() => { throw bad('Invalid end date'); })()) : '';
+    let code; do { code = reason.slice(0, 4).toUpperCase() + '-' + uid().slice(0, 5).toUpperCase(); } while (d().vouchers.some((v) => v.code === code));
+    title = title || `${reason} reward`;
+    d().vouchers.push({ id: uid(), createdAt: Date.now(), code, title, description: `${reason} reward for ${u.name}`, type, value, minSpend: money(body.minSpend || 0, 'Minimum spend'), maxDiscount: 0, startDate: '', endDate, scope: 'specific', customerIds: [u.id], appliesTo: 'all', perCustomerLimit: 1, totalLimit: 1, active: true });
+    title += ` (voucher ${code})`;
+  } else if (kind === 'points') {
+    const pts = round2(num(body.points, 0)); if (!(pts > 0)) throw bad('Enter the points to give');
+    L.addPoints(u.id, pts, 'reward', `${reason} reward${title ? ': ' + title : ''}`);
+    title = `${pts} bonus point(s)`;
+  } else if (kind === 'session') {
+    const [type, id] = String(body.item || '').split(':');
+    const priced = L.priceOrder(u, [{ type: type === 'package' ? 'package' : 'service', id, qty: 1 }], { points: 0 });
+    priced.lines.forEach((l) => { l.unitPrice = 0; }); priced.subtotal = 0; priced.total = 0; priced.depositRequired = 0;
+    const expiry = body.expiryDate ? (isDate(body.expiryDate) ? body.expiryDate : (() => { throw bad('Invalid expiry date'); })()) : null;
+    const o = L.createOrder(u, priced, { source: 'reward', createdBy: user.id });
+    const label = title || `${reason} reward: ${priced.lines[0].name}`;
+    d().entitlements.filter((e) => e.orderId === o.id).forEach((e) => { e.title = label; if (expiry) e.expiryDate = expiry; });
+    title = label;
+  } else throw bad('Choose a reward type');
+  u.rewards = u.rewards || [];
+  u.rewards.push({ id: uid(), kind, reason, title, at: Date.now(), by: user.name });
+  emailUser(u, `You received a ${reason.toLowerCase()} reward`, `Hi ${u.name},\n\nWe have added a reward to your account: ${title}.\nLog in to see it under Rewards / My Wallet.`);
+  return { customer: customerRow(u) };
 }));
 
 // ================= admin: orders & payments =================
@@ -587,11 +671,22 @@ route('POST', '/api/admin/payments/:id', OWNER, mutates(({ user, params, body })
   else if (body.action === 'reject') { p.status = 'rejected'; p.reason = str(body.reason, 200); }
   else throw bad('Unknown action');
   if (p.kind === 'order') { const o = d().orders.find((x) => x.id === p.refId); if (o) L.refreshOrder(o); }
+  const pu = d().users.find((x) => x.id === p.customerId);
+  emailUser(pu, body.action === 'confirm' ? 'Payment confirmed' : 'Payment receipt rejected', body.action === 'confirm' ? `Hi ${pu.name},\n\nWe confirmed your payment of RM${p.amount.toFixed(2)}. Thank you!` : `Hi ${pu.name},\n\nWe could not verify your receipt of RM${p.amount.toFixed(2)}${p.reason ? ' (' + p.reason + ')' : ''}. Please upload it again or contact us.`);
   return { ok: true };
 }));
 
 // ================= admin: settings, stats, upload =================
-route('GET', '/api/admin/settings', OWNER, () => ({ settings: d().settings }));
+const settingsOut = () => { const st = JSON.parse(JSON.stringify(d().settings)); const owner = d().users.find((u) => u.role === 'owner'); st.smtp.passSet = !!st.smtp.pass; delete st.smtp.pass; st.ownerEmail = owner ? owner.email : ''; return st; };
+route('GET', '/api/admin/settings', OWNER, () => ({ settings: settingsOut() }));
+route('GET', '/api/admin/mail-log', OWNER, () => ({ items: d().mailLog || [] }));
+route('POST', '/api/admin/test-email', OWNER, async ({ user }) => {
+  const to = d().settings.ownerNotifyEmail || user.email;
+  if (!to) throw bad('Please save your owner email first');
+  const r = await mail.send(to, 'Test email from your Fubao portal', 'If you can read this, your email alerts are working.', { force: true });
+  if (!r.ok) throw bad('Could not send: ' + r.error);
+  return { ok: true, to };
+});
 route('PUT', '/api/admin/settings', OWNER, mutates(({ body }) => {
   const st = d().settings, b = body;
   const areas = (Array.isArray(b.homeAreas) ? b.homeAreas : String(b.homeAreas || '').split(/[\n,]/)).map((x) => str(x, 60)).filter(Boolean).slice(0, 60);
@@ -603,9 +698,15 @@ route('PUT', '/api/admin/settings', OWNER, mutates(({ body }) => {
     slotStepMin: [15, 30, 60].includes(Number(b.slotStepMin)) ? Number(b.slotStepMin) : 30, minLeadHours: int(b.minLeadHours, 0, 168, 'Minimum notice (hours)'),
     maxAdvanceDays: int(b.maxAdvanceDays, 1, 365, 'Booking window (days)'), cancelHours: int(b.cancelHours, 0, 168, 'Cancellation notice (hours)'),
     depositPercent: int(b.depositPercent, 0, 100, 'Deposit %'), pointsEarnPerRM: int(b.pointsEarnPerRM, 1, 100000, 'Spend per point'), pointValueRM: money(b.pointValueRM, 'Point value'),
-    gamePoints: round2(Math.max(0, num(b.gamePoints, 0.01))), bank: { bankName: str(bank.bankName, 80), accountNo: str(bank.accountNo, 40), accountName: str(bank.accountName, 80), instructions: str(bank.instructions, 500) },
+    gamePoints: round2(Math.max(0, num(b.gamePoints, 0.01))), emailEnabled: bool(b.emailEnabled, false), bank: { bankName: str(bank.bankName, 80), accountNo: str(bank.accountNo, 40), accountName: str(bank.accountName, 80), instructions: str(bank.instructions, 500) },
   });
-  return { settings: st };
+  const sm = b.smtp || {};
+  st.smtp = { host: str(sm.host, 120), port: int(sm.port || 465, 1, 65535, 'Email server port'), user: str(sm.user, 120), pass: sm.pass ? String(sm.pass).slice(0, 200) : (st.smtp || {}).pass || '', fromName: str(sm.fromName, 80) || st.studioName, fromEmail: U.normEmail(sm.fromEmail) };
+  const oe = U.normEmail(b.ownerEmail), owner = d().users.find((u) => u.role === 'owner');
+  if (oe && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(oe)) throw bad('Please enter a valid owner email');
+  if (oe && d().users.some((u) => u.id !== owner.id && u.email === oe)) throw bad('That email is used by another account');
+  owner.email = oe; st.ownerNotifyEmail = oe;
+  return { settings: settingsOut() };
 }));
 route('POST', '/api/admin/owner-password', OWNER, mutates(({ user, body }) => {
   if (!U.checkPassword(body.current, user.passHash)) throw bad('Your current password is incorrect');

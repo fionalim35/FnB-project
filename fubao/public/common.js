@@ -116,3 +116,23 @@
   };
   FB.fileInput = (accept = 'image/*') => `<input type="file" accept="${accept}" capture="environment" style="display:none">`;
 })();
+
+// Forgot / reset password view (shared by customer app and staff portal)
+FB.forgotView = function (box, back) {
+  const esc = FB.esc;
+  box.innerHTML = `<div class="center" style="margin:10px 0 18px"><h1>Reset password</h1><p class="muted">We will email a 6-digit code to the email address on your account.</p></div>
+    <form class="card" id="fg1"><div class="field"><label class="f">Contact number or email</label><input type="text" name="identifier" required></div><button class="btn block">Send me a code</button></form>
+    <form class="card hide" id="fg2" style="margin-top:12px"><div class="note" id="fgmsg" style="margin-bottom:10px"></div><div class="field"><label class="f">6-digit code from your email</label><input type="text" name="code" inputmode="numeric" maxlength="6" required></div><div class="field"><label class="f">New password (min 6 characters)</label><input type="password" name="password" minlength="6" required></div><button class="btn block">Set new password</button></form>
+    <p class="center" style="margin-top:14px"><button class="link" id="fgback">← Back to log in</button></p>`;
+  let ident = '';
+  box.querySelector('#fgback').onclick = back;
+  box.querySelector('#fg1').onsubmit = async (e) => {
+    e.preventDefault(); const btn = e.target.querySelector('button'); btn.disabled = true;
+    try { ident = e.target.identifier.value; const r = await FB.post('/api/auth/forgot', { identifier: ident }); box.querySelector('#fgmsg').textContent = r.message; box.querySelector('#fg2').classList.remove('hide'); } catch (x) { FB.err(x); }
+    btn.disabled = false;
+  };
+  box.querySelector('#fg2').onsubmit = async (e) => {
+    e.preventDefault();
+    try { await FB.post('/api/auth/reset', { identifier: ident, code: e.target.code.value, password: e.target.password.value }); FB.toast('Password changed. Please log in.', 'ok'); back(); } catch (x) { FB.err(x); }
+  };
+};

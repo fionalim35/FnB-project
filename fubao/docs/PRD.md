@@ -17,5 +17,6 @@
 | 10 | Vouchers and points (RM100 = 1 pt = RM1) | Done |
 | 11 | Daily mini-game, +0.01 point, once a day | Done |
 
-**Out of scope for v1:** online payment gateway, SMS/WhatsApp/email notifications, automatic birthday/referral rewards (use vouchers), password-reset email (owner resets), multi-branch.
-**Open assumptions to confirm:** default opening hours Mon–Sat 10:00–19:00; package validities (180 days; embroidery 60; fillers/RM988 365); session lengths; embroidery/fillers studio-only; customers may cancel confirmed bookings ≥24h ahead.
+**v1.1 additions:** email alerts via free SMTP; forgot-password for all accounts; per-customer birthday/referral rewards set by owner.
+**Out of scope:** online payment gateway, SMS/WhatsApp alerts, multi-branch.
+**Owner-configurable (backend):** opening hours, package validity, session length, studio/home per service, cancellation notice (default 24h).

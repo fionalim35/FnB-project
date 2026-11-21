@@ -1,9 +1,11 @@
 'use strict';
 // End-to-end API test. Runs the real server against a throw-away data folder.
 const fs = require('fs'), os = require('os'), path = require('path'), assert = require('assert');
+process.env.FUBAO_SMTP_ALLOW_SELF_SIGNED = '1';
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'fubao-test-'));
 const server = require('../server.js');
 const U = require('../lib/util');
+const fake = require('./fakesmtp');
 
 let base, passed = 0;
 async function call(method, url, body, token) {
@@ -50,13 +52,13 @@ function nextOpenDate(minDays = 2) {
     step('owner adds package with validity');
 
     // ---- customer registers & vouchers
-    const reg = await ok(call('POST', '/api/auth/register', { name: 'Alice', phone: '012-345 6789', password: 'secret1' }));
+    const reg = await ok(call('POST', '/api/auth/register', { name: 'Alice', phone: '012-345 6789', email: 'alice@example.com', password: 'secret1' }));
     const C = reg.token;
-    await fail(call('POST', '/api/auth/register', { name: 'Alice2', phone: '0123456789', password: 'secret1' }), 400, 'already registered');
+    await fail(call('POST', '/api/auth/register', { name: 'Alice2', phone: '0123456789', email: 'a2@example.com', password: 'secret1' }), 400, 'already registered');
     await fail(call('GET', '/api/admin/stats', null, C), 403);
     const all = (await ok(call('POST', '/api/admin/vouchers', { code: 'ALL10', title: '10 off', type: 'amount', value: 10, scope: 'all' }, O))).item;
     const mine = (await ok(call('POST', '/api/admin/vouchers', { code: 'ALICE20', title: 'Alice only', type: 'percent', value: 20, maxDiscount: 15, scope: 'specific', customerIds: [reg.user.id] }, O))).item;
-    const reg2 = await ok(call('POST', '/api/auth/register', { name: 'Bob', phone: '0111111111', password: 'secret2' }));
+    const reg2 = await ok(call('POST', '/api/auth/register', { name: 'Bob', phone: '0111111111', email: 'bob@example.com', password: 'secret2' }));
     const v1 = (await ok(call('GET', '/api/my', null, C))).vouchers, v2 = (await ok(call('GET', '/api/my', null, reg2.token))).vouchers;
     assert(v1.some((v) => v.code === 'ALICE20') && !v2.some((v) => v.code === 'ALICE20') && v2.some((v) => v.code === 'ALL10'));
     await fail(call('POST', '/api/quote', { lines: [{ type: 'package', id: pkg.id, qty: 1 }], voucherId: mine.id }, reg2.token), 400, 'not available');
@@ -163,6 +165,74 @@ function nextOpenDate(minDays = 2) {
     const bob = await ok(call('GET', '/api/my', null, reg2.token)); assert(bob.entitlements.length === 0 && bob.bookings.length === 0);
     const stats = await ok(call('GET', '/api/admin/stats', null, O)); assert(stats.customers === 2);
     step('customers only see their own information');
+
+    // ---- email alerts through a (fake) SMTP server
+    const smtp = await fake.start();
+    await fail(call('POST', '/api/auth/register', { name: 'NoMail', phone: '0199999999', password: 'secret1' }), 400, 'email');
+    await fail(call('POST', '/api/admin/test-email', {}, O), 400);
+    await ok(call('PUT', '/api/admin/settings', { ...(await ok(call('GET', '/api/admin/settings', null, O))).settings, emailEnabled: true, ownerEmail: 'owner@example.com', smtp: { host: '127.0.0.1', port: smtp.port, user: 'studio@example.com', pass: 'app-pass', fromName: 'Fubao', fromEmail: 'studio@example.com' } }, O));
+    const gs = (await ok(call('GET', '/api/admin/settings', null, O))).settings; assert(gs.smtp.passSet && gs.smtp.pass === undefined, 'password never sent back');
+    await ok(call('POST', '/api/admin/test-email', {}, O));
+    const wait = async (fn) => { for (let i = 0; i < 40; i++) { const m = fn(); if (m) return m; await new Promise((r) => setTimeout(r, 50)); } assert.fail('email not received'); };
+    await wait(() => smtp.mails.find((m) => m.to === 'owner@example.com' && /Test email/.test(m.subject)));
+    step('email: owner can set up SMTP and send a test email (password hidden afterwards)');
+
+    // booking alert to owner, confirmation to customer
+    const date2 = nextOpenDate(3);
+    const myAfter = await ok(call('GET', '/api/my', null, C));
+    const entForMail = myAfter.entitlements.find((e) => e.bookable && !e.unlimited && e.serviceId === svc.id) || myAfter.entitlements.find((e) => e.bookable);
+    const bk2 = (await ok(call('POST', '/api/bookings', { entitlementId: entForMail.id, mode: 'studio', date: date2, start: '14:00', beauticianId: null, contact: { name: 'Alice', phone: '0123456789' } }, C))).booking;
+    await ok(call('PUT', `/api/admin/staff/${bea.id}/day`, { date: date2, mode: 'default' }, O)).catch(() => {});
+    await wait(() => smtp.mails.find((m) => m.to === 'owner@example.com' && /New booking request/.test(m.subject)));
+    await ok(call('POST', `/api/admin/bookings/${bk2.id}/action`, { action: 'approve' }, O));
+    await wait(() => smtp.mails.find((m) => m.to === 'alice@example.com' && /confirmed/.test(m.subject)));
+    step('email: owner alerted on new booking; customer emailed when approved');
+
+    // ---- password reset (customer, beautician, owner)
+    const forgot = await ok(call('POST', '/api/auth/forgot', { identifier: '0123456789' }));
+    const codeMail = await wait(() => smtp.mails.find((m) => m.to === 'alice@example.com' && /reset code/.test(m.subject)));
+    const code = /code is: (\d{6})/.exec(codeMail.text)[1];
+    await fail(call('POST', '/api/auth/reset', { identifier: '0123456789', code: '000000', password: 'newpass1' }), 400, 'Incorrect');
+    await fail(call('POST', '/api/auth/reset', { identifier: '0123456789', code, password: 'abc' }), 400, 'at least 6');
+    await ok(call('POST', '/api/auth/reset', { identifier: 'alice@example.com', code, password: 'newpass1' }));
+    await fail(call('POST', '/api/auth/login', { identifier: '0123456789', password: 'secret1' }), 401);
+    await ok(call('POST', '/api/auth/login', { identifier: '0123456789', password: 'newpass1' }));
+    await fail(call('GET', '/api/my', null, C), 401); // old sessions signed out
+    await fail(call('POST', '/api/auth/reset', { identifier: '0123456789', code, password: 'another1' }), 400, 'invalid');
+    const ghost = await ok(call('POST', '/api/auth/forgot', { identifier: '0100000000' })); assert.strictEqual(ghost.message, forgot.message, 'does not reveal whether an account exists');
+    await ok(call('PUT', '/api/admin/staff/' + bea.id, { ...bea, skills: bea.skills, email: 'bea@example.com' }, O));
+    await ok(call('POST', '/api/auth/forgot', { identifier: 'bea@example.com' }));
+    const bm = await wait(() => smtp.mails.find((m) => m.to === 'bea@example.com' && /reset code/.test(m.subject)));
+    await ok(call('POST', '/api/auth/reset', { identifier: '0120000001', code: /code is: (\d{6})/.exec(bm.text)[1], password: 'beauty456' }));
+    await ok(call('POST', '/api/auth/login', { identifier: '0120000001', password: 'beauty456' }));
+    await ok(call('POST', '/api/auth/forgot', { identifier: '0182530288' }));
+    const om = await wait(() => smtp.mails.filter((m) => m.to === 'owner@example.com' && /reset code/.test(m.subject))[0]);
+    await ok(call('POST', '/api/auth/reset', { identifier: 'owner@example.com', code: /code is: (\d{6})/.exec(om.text)[1], password: 'owner2026' }));
+    await ok(call('POST', '/api/auth/login', { identifier: '0182530288', password: 'owner2026' }));
+    step('password reset by emailed code works for customer, beautician and owner');
+
+    // ---- rewards from the customer profile (birthday / referral)
+    const O2 = (await ok(call('POST', '/api/auth/login', { identifier: '0182530288', password: 'owner2026' }))).token;
+    const C2 = (await ok(call('POST', '/api/auth/login', { identifier: '0123456789', password: 'newpass1' }))).token;
+    const month = U.nowMY().date.slice(0, 7);
+    await ok(call('PUT', '/api/admin/customers/' + reg.user.id, { name: 'Alice', phone: '0123456789', email: 'alice@example.com', birthday: '1995-' + month.slice(5) + '-15', referredBy: reg2.user.id, active: true }, O2));
+    const bl = (await ok(call('GET', '/api/admin/customers?birthday=month', null, O2))).items; assert(bl.length === 1 && bl[0].birthdayThisMonth);
+    assert.strictEqual((await ok(call('GET', '/api/admin/customers', null, O2))).items.find((c) => c.id === reg2.user.id).referrals, 1);
+    const pts0 = (await ok(call('GET', '/api/my', null, C2))).points;
+    await ok(call('POST', `/api/admin/customers/${reg.user.id}/reward`, { kind: 'voucher', reason: 'Birthday', type: 'amount', value: 30, endDate: U.addDays(U.nowMY().date, 30) }, O2));
+    await ok(call('POST', `/api/admin/customers/${reg.user.id}/reward`, { kind: 'points', reason: 'Referral', points: 3 }, O2));
+    const lashId = pub.services.find((s) => s.name.startsWith('Camellia')).id;
+    await ok(call('POST', `/api/admin/customers/${reg.user.id}/reward`, { kind: 'session', reason: 'Birthday', item: 'service:' + lashId, title: 'Birthday free lash', expiryDate: U.addDays(U.nowMY().date, 20) }, O2));
+    const mine2 = await ok(call('GET', '/api/my', null, C2));
+    assert(mine2.vouchers.some((v) => /^BIRT-/.test(v.code) && v.usable));
+    assert.strictEqual(mine2.points, pts0 + 3);
+    const free = mine2.entitlements.find((e) => e.title === 'Birthday free lash');
+    assert(free && free.state === 'active' && free.total === 1 && free.expiryDate === U.addDays(U.nowMY().date, 20));
+    assert.strictEqual(mine2.rewards.length, 3);
+    const bobSees = await ok(call('GET', '/api/my', null, reg2.token)); assert(!bobSees.vouchers.some((v) => /^BIRT-/.test(v.code)));
+    await wait(() => smtp.mails.find((m) => m.to === 'alice@example.com' && /birthday reward/.test(m.subject)));
+    step('owner gives birthday/referral rewards (voucher, points, free session) from the customer profile');
+    smtp.close();
     console.log(`\nAll ${passed} checks passed.`);
     process.exitCode = 0;
   } catch (e) {

@@ -336,7 +336,7 @@ function bookingView(b) {
   const cust = s.users.find((u) => u.id === b.customerId);
   return { ...b, beauticianName: staff ? staff.name : '', customerName: cust ? cust.name : '', customerPhone: cust ? cust.phone : '', feeStatus, payments: pays.map(paymentView) };
 }
-const pubUser = (u) => ({ id: u.id, role: u.role, name: u.name, phone: u.phone, email: u.email || '', address: u.address || '', area: u.area || '', skills: u.skills || undefined });
+const pubUser = (u) => ({ id: u.id, role: u.role, name: u.name, phone: u.phone, email: u.email || '', address: u.address || '', area: u.area || '', birthday: u.birthday || '', skills: u.skills || undefined });
 
 module.exports = {
   d, BOOKED, pointsBalance, addPoints, flashActive, flashView, decorate, catalog, voucherProblem, voucherDiscount, entitledVouchers, voucherUsage,
