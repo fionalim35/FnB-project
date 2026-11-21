@@ -1,0 +1,43 @@
+body{background:#f4efe6}
+#layout{display:flex;min-height:100vh}
+#side{width:240px;background:#2b2218;color:#eadbbd;padding:18px 12px;position:sticky;top:0;height:100vh;overflow:auto;flex:none}
+#side .logo{font-family:var(--serif);font-size:26px;color:#f7e2b0;font-weight:700;padding:4px 10px 2px;line-height:1}
+#side .logo small{display:block;font:600 9.5px sans-serif;letter-spacing:2.6px;text-transform:uppercase;color:#b8924a;margin-top:4px}
+#side a{display:flex;gap:10px;align-items:center;color:#d8c9a8;text-decoration:none;padding:10px 12px;border-radius:12px;margin-top:3px;font-weight:600;font-size:14.5px}
+#side a:hover{background:rgba(255,255,255,.07)} #side a.on{background:#b8924a;color:#2b2218}
+#side .who{margin:18px 10px 8px;font-size:12px;color:#a8977a}
+#main{flex:1;min-width:0;padding:22px 26px 60px}
+#mbar{display:none}
+.pg-h{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin-bottom:20px}
+.sc{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px 16px;cursor:pointer;text-decoration:none;color:inherit;display:block}
+.sc b{display:block;font-family:var(--serif);font-size:32px;color:var(--brand-dk);line-height:1.1} .sc span{font-size:12.5px;color:var(--muted);font-weight:600}
+.sc.alert b{color:var(--bad)}
+.filters{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:end} .filters .field{margin:0} .filters select,.filters input{min-width:140px;width:auto}
+.hrs{display:grid;grid-template-columns:70px 24px 1fr 1fr 2fr;gap:6px;align-items:center;margin-bottom:6px;font-size:13px}
+.hrs input[type=time]{padding:7px 6px}
+.hrs .dn{font-weight:700} .hrs .h2{display:flex;gap:6px}
+.mcal{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.mcal .dn{text-align:center;font-size:12px;font-weight:700;color:var(--muted);padding:4px}
+.mcal .dc{min-height:78px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:6px 8px;cursor:pointer;text-align:left;display:flex;flex-direction:column;gap:3px;font-size:12px}
+.mcal .dc:hover{border-color:var(--gold)} .mcal .dc.closed{background:#f1ebe0;color:#a89c88} .mcal .dc.today{box-shadow:0 0 0 2px var(--gold)}
+.mcal .dc b{font-size:15px} .mcal .dc .n{background:var(--brand);color:#fff;border-radius:999px;padding:1px 8px;align-self:flex-start;font-weight:700}
+.mcal .dc .pn{background:var(--warn-bg);color:var(--warn);border-radius:999px;padding:1px 8px;align-self:flex-start;font-weight:700}
+.mcal .dc.empty{background:transparent;border:0;cursor:default}
+.tl{border-left:3px solid var(--gold);padding-left:12px;margin:8px 0}
+.skillbox{border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:8px;background:#fff}
+.skillbox label{display:inline-flex;gap:6px;align-items:center;margin:4px 12px 4px 0;font-size:14px}
+.pick{max-height:200px;overflow:auto;border:1.5px solid var(--line);border-radius:12px;background:#fff;padding:6px 10px}
+.pick label{display:flex;gap:8px;align-items:center;padding:5px 0;font-size:14px}
+.rcpt{width:70px;height:70px;object-fit:cover;border-radius:10px;border:1px solid var(--line);cursor:pointer}
+.ibtn{border:0;background:var(--gold-soft);color:var(--brand);border-radius:8px;padding:5px 10px;font-weight:700;cursor:pointer;font-size:12.5px}
+.ibtn.ok{background:var(--ok-bg);color:var(--ok)} .ibtn.bad{background:var(--bad-bg);color:var(--bad)}
+.tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
+.login{max-width:400px;margin:8vh auto 0;padding:0 16px}
+.ent{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px dashed var(--line);font-size:14px;align-items:center}
+@media(max-width:860px){
+  #layout{display:block} #side{position:fixed;left:-260px;top:0;z-index:60;transition:left .2s;width:240px} #side.open{left:0;box-shadow:0 0 0 100vmax rgba(0,0,0,.45)}
+  #mbar{display:flex;align-items:center;gap:12px;background:#2b2218;color:#f7e2b0;padding:10px 14px;position:sticky;top:0;z-index:50;font-family:var(--serif);font-size:22px;font-weight:700}
+  #mbar button{background:none;border:0;color:#f7e2b0;font-size:26px;cursor:pointer;padding:0 4px} #main{padding:16px 14px 60px}
+  .hrs{grid-template-columns:54px 22px 1fr 1fr} .hrs .h2{grid-column:3 / span 2} .mcal .dc{min-height:60px;padding:4px 5px} .mcal .dc .n,.mcal .dc .pn{font-size:10px;padding:0 6px}
+}

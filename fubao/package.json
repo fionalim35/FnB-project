@@ -1,0 +1,14 @@
+{
+  "name": "fubao-beauty-portal",
+  "version": "1.0.0",
+  "description": "Fubao Beauty Centre - customer web app (services, packages, bookings, rewards) and owner/beautician portal",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "demo": "DEMO=1 node server.js",
+    "test": "node test/smoke.js"
+  },
+  "engines": { "node": ">=18" },
+  "license": "UNLICENSED",
+  "private": true
+}
